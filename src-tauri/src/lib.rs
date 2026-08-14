@@ -680,55 +680,94 @@ fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
 
     #[cfg(target_os = "macos")]
     {
-        std::thread::spawn(|| {
-            use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopRun};
-            use core_graphics::event::{
-                CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-                CGEventType, EventTap,
-            };
-            use std::sync::atomic::Ordering;
+        use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopRun};
+        use std::ffi::c_void;
+        use std::sync::atomic::Ordering;
 
-            let tap = EventTap::new(
-                CGEventTapLocation::HID,
-                CGEventTapPlacement::HeadInsertEventTap,
-                CGEventTapOptions::ListenOnly,
-                vec![CGEventType::KeyDown, CGEventType::KeyUp],
-                |_, event_type, event| {
-                    let flags = event.get_flags();
-                    let key_code = event.get_integer_value_field(core_graphics::event::EventField::KeyboardEventKeycode);
-                    
-                    // 15 is virtual key code for 'R' on macOS keyboard layout
-                    if key_code == 15 {
-                        let is_cmd = flags.contains(CGEventFlags::CGEventFlagCommand);
-                        let is_alt = flags.contains(CGEventFlags::CGEventFlagAlternate);
-                        let is_ctrl = flags.contains(CGEventFlags::CGEventFlagControl);
+        type CGEventTapProxy = *mut c_void;
+        type CGEventType = u32;
+        type CGEventRef = *mut c_void;
+        type CFMachPortRef = *mut c_void;
+        type CFRunLoopSourceRef = *mut c_void;
 
-                        if (is_cmd || is_ctrl) && is_alt {
-                            if event_type == CGEventType::KeyDown {
-                                if !IS_HOTKEY_DOWN.swap(true, Ordering::SeqCst) {
-                                    if let Ok(guard) = APP_HANDLE_FOR_HOTKEY.lock() {
-                                        if let Some(ref handle) = *guard {
-                                            let _ = handle.emit("toggle_mic_shortcut", ());
-                                        }
-                                    }
+        const K_CG_EVENT_KEY_DOWN: u32 = 10;
+        const K_CG_EVENT_KEY_UP: u32 = 11;
+        const K_CG_EVENT_MASK_FOR_ALL_KEYS: u64 = (1 << K_CG_EVENT_KEY_DOWN) | (1 << K_CG_EVENT_KEY_UP);
+
+        const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
+        const K_CG_EVENT_FLAG_MASK_ALTERNATE: u64 = 0x00080000;
+        const K_CG_EVENT_FLAG_MASK_CONTROL: u64 = 0x00040000;
+        const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 14;
+
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGEventTapCreate(
+                tap: u32,
+                place: u32,
+                options: u32,
+                events_of_interest: u64,
+                callback: unsafe extern "C" fn(CGEventTapProxy, CGEventType, CGEventRef, *mut c_void) -> CGEventRef,
+                user_info: *mut c_void,
+            ) -> CFMachPortRef;
+
+            fn CGEventGetFlags(event: CGEventRef) -> u64;
+            fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
+            fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+            fn CFMachPortCreateRunLoopSource(allocator: *const c_void, port: CFMachPortRef, order: isize) -> CFRunLoopSourceRef;
+        }
+
+        unsafe extern "C" fn event_tap_callback(
+            _proxy: CGEventTapProxy,
+            event_type: CGEventType,
+            event: CGEventRef,
+            _refcon: *mut c_void,
+        ) -> CGEventRef {
+            if event.is_null() {
+                return event;
+            }
+
+            let key_code = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
+            // 15 is virtual key code for 'R' on macOS layout
+            if key_code == 15 {
+                let flags = CGEventGetFlags(event);
+                let is_cmd = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
+                let is_alt = (flags & K_CG_EVENT_FLAG_MASK_ALTERNATE) != 0;
+                let is_ctrl = (flags & K_CG_EVENT_FLAG_MASK_CONTROL) != 0;
+
+                if (is_cmd || is_ctrl) && is_alt {
+                    if event_type == K_CG_EVENT_KEY_DOWN {
+                        if !IS_HOTKEY_DOWN.swap(true, Ordering::SeqCst) {
+                            if let Ok(guard) = APP_HANDLE_FOR_HOTKEY.lock() {
+                                if let Some(ref handle) = *guard {
+                                    let _ = handle.emit("toggle_mic_shortcut", ());
                                 }
-                            } else if event_type == CGEventType::KeyUp {
-                                IS_HOTKEY_DOWN.store(false, Ordering::SeqCst);
                             }
                         }
+                    } else if event_type == K_CG_EVENT_KEY_UP {
+                        IS_HOTKEY_DOWN.store(false, Ordering::SeqCst);
                     }
-                    None
-                },
+                }
+            }
+
+            event
+        }
+
+        std::thread::spawn(|| unsafe {
+            let tap = CGEventTapCreate(
+                0,
+                0,
+                1,
+                K_CG_EVENT_MASK_FOR_ALL_KEYS,
+                event_tap_callback,
+                std::ptr::null_mut(),
             );
 
-            if let Ok(tap) = tap {
-                unsafe {
-                    let loop_source = tap.mach_port.create_runloop_source(0);
-                    if let Ok(source) = loop_source {
-                        CFRunLoopAddSource(CFRunLoopGetCurrent(), source.as_concrete_TypeRef(), kCFRunLoopCommonModes);
-                        tap.enable();
-                        CFRunLoopRun();
-                    }
+            if !tap.is_null() {
+                let run_loop_source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
+                if !run_loop_source.is_null() {
+                    CFRunLoopAddSource(CFRunLoopGetCurrent(), run_loop_source as _, kCFRunLoopCommonModes);
+                    CGEventTapEnable(tap, true);
+                    CFRunLoopRun();
                 }
             }
         });
