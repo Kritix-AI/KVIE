@@ -24,10 +24,8 @@ windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "W
 windows = { version = "0.58", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.26"
 core-foundation = "0.10"
 core-graphics = "0.24"
-objc = "0.2"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

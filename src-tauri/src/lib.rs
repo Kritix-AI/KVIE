@@ -349,25 +349,44 @@ fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
 
 #[cfg(target_os = "macos")]
 fn get_macos_frontmost_app() -> Option<ActiveAppInfo> {
-    use std::ffi::{c_void, CStr};
-    use objc::{class, msg_send, sel, sel_impl};
+    use std::ffi::{c_char, c_void, CStr};
 
     type Id = *mut c_void;
+    type Sel = *mut c_void;
+
+    #[link(name = "objc", kind = "dylib")]
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend(receiver: Id, op: Sel, ...) -> Id;
+    }
 
     unsafe {
-        let workspace: Id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let cls_nsworkspace = objc_getClass(b"NSWorkspace\0".as_ptr() as _);
+        if cls_nsworkspace.is_null() {
+            return None;
+        }
+
+        let sel_shared = sel_registerName(b"sharedWorkspace\0".as_ptr() as _);
+        let workspace = objc_msgSend(cls_nsworkspace, sel_shared);
         if workspace.is_null() {
             return None;
         }
-        let frontmost: Id = msg_send![workspace, frontmostApplication];
+
+        let sel_frontmost = sel_registerName(b"frontmostApplication\0".as_ptr() as _);
+        let frontmost = objc_msgSend(workspace, sel_frontmost);
         if frontmost.is_null() {
             return None;
         }
-        let localized_name: Id = msg_send![frontmost, localizedName];
+
+        let sel_loc_name = sel_registerName(b"localizedName\0".as_ptr() as _);
+        let localized_name = objc_msgSend(frontmost, sel_loc_name);
+
+        let sel_utf8 = sel_registerName(b"UTF8String\0".as_ptr() as _);
         let app_name = if !localized_name.is_null() {
-            let utf8: *const std::os::raw::c_char = msg_send![localized_name, UTF8String];
-            if !utf8.is_null() {
-                CStr::from_ptr(utf8).to_string_lossy().into_owned()
+            let utf8_ptr = objc_msgSend(localized_name, sel_utf8) as *const c_char;
+            if !utf8_ptr.is_null() {
+                CStr::from_ptr(utf8_ptr).to_string_lossy().into_owned()
             } else {
                 "Active App".to_string()
             }
@@ -375,11 +394,12 @@ fn get_macos_frontmost_app() -> Option<ActiveAppInfo> {
             "Active App".to_string()
         };
 
-        let bundle_id: Id = msg_send![frontmost, bundleIdentifier];
+        let sel_bundle_id = sel_registerName(b"bundleIdentifier\0".as_ptr() as _);
+        let bundle_id = objc_msgSend(frontmost, sel_bundle_id);
         let process_name = if !bundle_id.is_null() {
-            let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
-            if !utf8.is_null() {
-                CStr::from_ptr(utf8).to_string_lossy().into_owned()
+            let utf8_ptr = objc_msgSend(bundle_id, sel_utf8) as *const c_char;
+            if !utf8_ptr.is_null() {
+                CStr::from_ptr(utf8_ptr).to_string_lossy().into_owned()
             } else {
                 app_name.clone()
             }
