@@ -1,0 +1,241 @@
+# =============================================================================
+# Kritix AI Assistant - .gitignore
+# Grouped by purpose for easy maintenance.
+# Last updated: 2026-06-23
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Secrets & environment (NEVER commit)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.*
+credentials.*
+
+# -----------------------------------------------------------------------------
+# 2. Python — virtualenvs, caches, compiled
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist-info/
+.eggs/
+build/lib/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+*.spec.bak
+
+# Stray project backup file
+SpeechToText_BACKUP.py
+
+# -----------------------------------------------------------------------------
+# 3. Node / Electron / Vite
+# -----------------------------------------------------------------------------
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+*.yarn-integrity
+dist/
+dist-electron/
+src-tauri/target/
+target/
+.cache/
+.vite/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# -----------------------------------------------------------------------------
+# 4. Logs (build output, runtime)
+# -----------------------------------------------------------------------------
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+logs/
+main_stdout.log
+main_stderr.log
+error.log
+output.log
+build.log
+build2.log
+build_debug.log
+build_fresh.log
+build_google_stt.log
+
+# -----------------------------------------------------------------------------
+# 5. PyInstaller / electron-builder output (CRITICAL)
+#    These directories have contained embedded .env in past builds.
+#    NEVER commit them.
+# -----------------------------------------------------------------------------
+dist_run/
+dist_temp/
+release/
+build/
+*.exe
+*.msi
+*.pkg
+*.pyz
+*.toc
+*.html           # PyInstaller xref HTML (build/xref-*.html)
+warn-*.txt
+*.app
+*.dmg
+*.deb
+*.AppImage
+*.snap
+*.blockmap
+*.asar
+*.bin            # V8 snapshot_blob.bin, v8_context_snapshot.bin
+*.ico.bak
+installer-*.yml
+builder-effective-config.yaml
+builder-debug.yml
+*.dll
+*.pdb
+
+# -----------------------------------------------------------------------------
+# 6. ML model caches (large binaries, ~210 MB combined)
+#    Re-create via install_voice_cloning.py + Vosk download (see README)
+# -----------------------------------------------------------------------------
+models/vosk-model-*/
+models/vosk-model-*/*
+Backend/voice/models/*
+Backend/voice/models/**
+!Backend/voice/models/.gitkeep
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.h5
+*.safetensors
+*.npz
+*.pkl
+*.bin            # model weights (e.g. model.bin)
+
+# -----------------------------------------------------------------------------
+# 7. User data / PII / runtime state (NEVER commit)
+#    These files contain chat history, voice samples, learning state, etc.
+# -----------------------------------------------------------------------------
+# Chat & memory
+Data/ChatLog.json
+Data/ChatLog.json.*
+Data/Database.data
+Data/Responses.data
+Data/Mic.data
+Data/Language.data
+Data/Status.data
+Data/temp_screenshot.png
+Data/speech.mp3
+Data/speech.*.mp3
+
+# Voice cloning samples (recordings of the user's voice)
+Data/VoiceCloning/samples/*.wav
+Data/VoiceCloning/samples/*.mp3
+Data/VoiceCloning/samples/*.flac
+Data/audio_cache/
+Data/audio_cache/**
+Data/VoiceCloning/cache/
+
+# Learning & RL state
+Data/Learning/*.json
+Data/Learning/**/*.json
+Data/RL/*
+Data/RL/**
+
+# User content dirs
+Data/Autopilot/*.json
+Data/Dispatch/*
+Data/Projects/*
+Data/Notes/*
+Data/LastGeneratedContent.json
+Data/ImageGeneration.data
+Data/content*.txt
+Data/voice.html
+Data/temp_screenshot.png
+Data/*.txt
+Data/ekkamkarohtmlkaeksimplesaexamplekolikho..txt
+Data/junefilekhulihuihaiusmeinhaylikho..txt
+
+# Backend mirror of the same runtime state
+Backend/Data/*.json
+Backend/Data/*.data
+Backend/Data/Mic.data
+Backend/Data/Language.data
+Backend/Data/Status.data
+Backend/Data/ChatLog.json
+Backend/Data/Database.data
+Backend/Data/Responses.data
+Backend/Data/VoiceLearner_*.json
+Backend/Data/Learning/*.json
+Backend/Data/Learning/**/*.json
+Backend/Data/**
+!Backend/Data/.gitkeep
+!Backend/Data/Learning/.gitkeep
+
+# -----------------------------------------------------------------------------
+# 8. Editor / AI-tool state
+# -----------------------------------------------------------------------------
+.amazonq/
+.claude/
+.cursor/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# -----------------------------------------------------------------------------
+# 9. OS-specific
+# -----------------------------------------------------------------------------
+$RECYCLE.BIN/
+System Volume Information/
+
+# -----------------------------------------------------------------------------
+# 10. Misc / defensive
+# -----------------------------------------------------------------------------
+*.pid
+*.pid.lock
+*.seed
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+.tmp/
+.temp/
+
+# Allow directory placeholders (the dirs themselves are ignored; the
+# .gitkeep files inside them are committed)
+!.gitkeep
+!/.gitkeep

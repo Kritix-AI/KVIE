@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent-color: #22d3ee;
+  --accent-glow: rgba(34, 211, 238, 0.35);
+  --accent-subtle: rgba(34, 211, 238, 0.15);
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { min-height: 100%; }
+  body { @apply bg-ink text-zinc-100 antialiased overflow-x-hidden; }
+  button { @apply cursor-pointer; }
+}
+
+/* Sleek Dark Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #242436;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-color);
+}
+
+.text-accent-dynamic {
+  color: var(--accent-color) !important;
+}
+
+.bg-accent-dynamic {
+  background-color: var(--accent-color) !important;
+}
+
+.bg-accent-subtle {
+  background-color: var(--accent-subtle) !important;
+}
+
+.border-accent-dynamic {
+  border-color: var(--accent-color) !important;
+}
+
+.shadow-accent-glow {
+  box-shadow: 0 0 55px var(--accent-glow) !important;
+}
+
+html.floating-window-mode,
+body.floating-window-mode,
+body.floating-window-mode #root {
+  min-height: 0 !important;
+  height: max-content !important;
+  width: max-content !important;
+  background: transparent !important;
+  overflow: hidden !important;
+}

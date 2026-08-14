@@ -1,0 +1,26 @@
+[package]
+name = "kritix"
+version = "0.1.0"
+description = "Kritix local-first voice AI desktop shell"
+authors = ["Kritix"]
+edition = "2021"
+
+[lib]
+name = "kritix_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }
+arboard = "3"
+enigo = "0.2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_Foundation"] }
+windows = { version = "0.58", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
