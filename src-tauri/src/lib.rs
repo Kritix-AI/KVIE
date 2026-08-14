@@ -246,6 +246,7 @@ fn toggle_floating_mic(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
     #[cfg(target_os = "windows")]
     {
@@ -348,21 +349,22 @@ fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
 
 #[cfg(target_os = "macos")]
 fn get_macos_frontmost_app() -> Option<ActiveAppInfo> {
-    use cocoa::base::{id, nil};
-    use objc::{msg_send, sel, sel_impl};
-    use std::ffi::CStr;
+    use std::ffi::{c_void, CStr};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    type Id = *mut c_void;
 
     unsafe {
-        let workspace: id = msg_send![objc::class!(NSWorkspace), sharedWorkspace];
-        if workspace == nil {
+        let workspace: Id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
             return None;
         }
-        let frontmost: id = msg_send![workspace, frontmostApplication];
-        if frontmost == nil {
+        let frontmost: Id = msg_send![workspace, frontmostApplication];
+        if frontmost.is_null() {
             return None;
         }
-        let localized_name: id = msg_send![frontmost, localizedName];
-        let app_name = if localized_name != nil {
+        let localized_name: Id = msg_send![frontmost, localizedName];
+        let app_name = if !localized_name.is_null() {
             let utf8: *const std::os::raw::c_char = msg_send![localized_name, UTF8String];
             if !utf8.is_null() {
                 CStr::from_ptr(utf8).to_string_lossy().into_owned()
@@ -373,8 +375,8 @@ fn get_macos_frontmost_app() -> Option<ActiveAppInfo> {
             "Active App".to_string()
         };
 
-        let bundle_id: id = msg_send![frontmost, bundleIdentifier];
-        let process_name = if bundle_id != nil {
+        let bundle_id: Id = msg_send![frontmost, bundleIdentifier];
+        let process_name = if !bundle_id.is_null() {
             let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
             if !utf8.is_null() {
                 CStr::from_ptr(utf8).to_string_lossy().into_owned()
