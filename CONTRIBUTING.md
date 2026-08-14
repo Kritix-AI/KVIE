@@ -7,9 +7,10 @@ Thank you for your interest in contributing to **KVIE**! We welcome bug reports,
 ## 🛠️ Development Setup
 
 1. **Prerequisites**:
-   - Windows 10/11
-   - Node.js (v18+)
-   - Rust toolchain (1.75+) with `x86_64-pc-windows-msvc`
+   - macOS (Apple Silicon M1-M4 / Intel) or Windows 10/11
+   - Node.js (v18+) & npm
+   - Rust toolchain (1.75+) with `cargo`
+   - Xcode Command Line Tools (on macOS: `xcode-select --install`)
    - Ollama (optional for local LLM inference)
 
 2. **Setup Repository**:
@@ -28,7 +29,10 @@ Thank you for your interest in contributing to **KVIE**! We welcome bug reports,
 
 ## 📁 Codebase Structure
 
-- `src-tauri/src/lib.rs`: Rust backend containing Win32 kernel low-level keyboard hooks (`WH_KEYBOARD_LL`), system tray initialization, process inspectors, and COM `IUIAutomation` surrounding text reader.
+- `src-tauri/src/lib.rs`: Cross-platform Rust engine supporting:
+  - **Windows**: Win32 low-level keyboard hooks (`WH_KEYBOARD_LL`), COM `IUIAutomation` surrounding text reader, and process inspectors.
+  - **macOS**: `CGEventTap` global hotkey listener, `AXUIElement` accessibility context extraction, and Cocoa `NSWorkspace` app tracker.
+- `src-tauri/Info.plist`: macOS application bundle permissions and usage descriptions.
 - `src/lib/autoEdit.ts`: Dual-Stage AI Auto-Edit pipeline (0ms Regex sanitizer + Qwen2.5-1.5B model).
 - `src/lib/snippetsEngine.ts`: Spoken trigger cue text expansion engine.
 - `src/lib/voiceCommandEngine.ts`: Voice Instruction Execution Engine (*"Make formal"*, *"Summarize"*).

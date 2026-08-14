@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --bundles nsis",
+    "tauri:build": "tauri build",
+    "tauri:build:win": "tauri build --bundles nsis,msi",
+    "tauri:build:mac": "tauri build --bundles dmg,app",
     "kvie:service": "python -m Backend.kvie.service",
     "preview": "vite preview",
     "start": "vite preview"

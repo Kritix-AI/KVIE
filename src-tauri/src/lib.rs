@@ -195,9 +195,18 @@ fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
         let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
         clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
         std::thread::sleep(std::time::Duration::from_millis(25));
-        enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
-        enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
-        enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
+        #[cfg(target_os = "macos")]
+        {
+            enigo.key(Key::Meta, Direction::Press).map_err(|error| error.to_string())?;
+            enigo.key(Key::Unicode('v'), Direction::Click).map_err(|error| error.to_string())?;
+            enigo.key(Key::Meta, Direction::Release).map_err(|error| error.to_string())?;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
+            enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
+            enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
 }
@@ -325,8 +334,62 @@ fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
             process_name,
         })
     }
-    #[cfg(not(target_os = "windows"))]
-    None
+    #[cfg(target_os = "macos")]
+    {
+        let _ = hwnd;
+        get_macos_frontmost_app()
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = hwnd;
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn get_macos_frontmost_app() -> Option<ActiveAppInfo> {
+    use cocoa::base::{id, nil};
+    use objc::{msg_send, sel, sel_impl};
+    use std::ffi::CStr;
+
+    unsafe {
+        let workspace: id = msg_send![objc::class!(NSWorkspace), sharedWorkspace];
+        if workspace == nil {
+            return None;
+        }
+        let frontmost: id = msg_send![workspace, frontmostApplication];
+        if frontmost == nil {
+            return None;
+        }
+        let localized_name: id = msg_send![frontmost, localizedName];
+        let app_name = if localized_name != nil {
+            let utf8: *const std::os::raw::c_char = msg_send![localized_name, UTF8String];
+            if !utf8.is_null() {
+                CStr::from_ptr(utf8).to_string_lossy().into_owned()
+            } else {
+                "Active App".to_string()
+            }
+        } else {
+            "Active App".to_string()
+        };
+
+        let bundle_id: id = msg_send![frontmost, bundleIdentifier];
+        let process_name = if bundle_id != nil {
+            let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
+            if !utf8.is_null() {
+                CStr::from_ptr(utf8).to_string_lossy().into_owned()
+            } else {
+                app_name.clone()
+            }
+        } else {
+            app_name.clone()
+        };
+
+        Some(ActiveAppInfo {
+            app_name,
+            process_name,
+        })
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -334,6 +397,84 @@ pub struct ActiveAppContext {
     pub app_name: String,
     pub process_name: String,
     pub surrounding_text: String,
+}
+
+#[cfg(target_os = "macos")]
+fn extract_macos_accessibility_text() -> String {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct __AXUIElement(c_void);
+    type AXUIElementRef = *mut __AXUIElement;
+    type AXError = i32;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+        fn AXUIElementCopyAttributeValue(
+            element: AXUIElementRef,
+            attribute: core_foundation::string::CFStringRef,
+            value: *mut core_foundation::base::CFTypeRef,
+        ) -> AXError;
+    }
+
+    unsafe {
+        let system_wide = AXUIElementCreateSystemWide();
+        if system_wide.is_null() {
+            return String::new();
+        }
+
+        let focused_attr = CFString::new("AXFocusedUIElement");
+        let mut focused_element_ref: core_foundation::base::CFTypeRef = std::ptr::null_mut();
+        let res = AXUIElementCopyAttributeValue(
+            system_wide,
+            focused_attr.as_concrete_TypeRef(),
+            &mut focused_element_ref,
+        );
+
+        if res != 0 || focused_element_ref.is_null() {
+            core_foundation::base::CFRelease(system_wide as _);
+            return String::new();
+        }
+
+        let focused_element = focused_element_ref as AXUIElementRef;
+        let value_attr = CFString::new("AXValue");
+        let mut value_ref: core_foundation::base::CFTypeRef = std::ptr::null_mut();
+        let val_res = AXUIElementCopyAttributeValue(
+            focused_element,
+            value_attr.as_concrete_TypeRef(),
+            &mut value_ref,
+        );
+
+        let mut extracted = String::new();
+        if val_res == 0 && !value_ref.is_null() {
+            let cf_str = CFString::wrap_under_create_rule(value_ref as _);
+            extracted = cf_str.to_string();
+        } else {
+            let selected_attr = CFString::new("AXSelectedText");
+            let mut sel_ref: core_foundation::base::CFTypeRef = std::ptr::null_mut();
+            let sel_res = AXUIElementCopyAttributeValue(
+                focused_element,
+                selected_attr.as_concrete_TypeRef(),
+                &mut sel_ref,
+            );
+            if sel_res == 0 && !sel_ref.is_null() {
+                let cf_str = CFString::wrap_under_create_rule(sel_ref as _);
+                extracted = cf_str.to_string();
+            }
+        }
+
+        core_foundation::base::CFRelease(focused_element as _);
+        core_foundation::base::CFRelease(system_wide as _);
+
+        if extracted.chars().count() > 500 {
+            extracted.chars().take(500).collect()
+        } else {
+            extracted.trim().to_string()
+        }
+    }
 }
 
 fn extract_focused_surrounding_text() -> String {
@@ -377,7 +518,11 @@ fn extract_focused_surrounding_text() -> String {
             return extracted.trim().to_string();
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        extract_macos_accessibility_text()
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     String::new()
 }
 
@@ -448,6 +593,23 @@ fn start_active_app_tracker() {
             }
         });
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::thread::spawn(|| {
+            loop {
+                if let Some(info) = get_macos_frontmost_app() {
+                    let proc_lower = info.process_name.to_lowercase();
+                    if !proc_lower.contains("kritix") {
+                        if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
+                            *guard = Some(info);
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+    }
 }
 
 fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
@@ -515,12 +677,74 @@ fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
             }
         });
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::thread::spawn(|| {
+            use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopRun};
+            use core_graphics::event::{
+                CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+                CGEventType, EventTap,
+            };
+            use std::sync::atomic::Ordering;
+
+            let tap = EventTap::new(
+                CGEventTapLocation::HID,
+                CGEventTapPlacement::HeadInsertEventTap,
+                CGEventTapOptions::ListenOnly,
+                vec![CGEventType::KeyDown, CGEventType::KeyUp],
+                |_, event_type, event| {
+                    let flags = event.get_flags();
+                    let key_code = event.get_integer_value_field(core_graphics::event::EventField::KeyboardEventKeycode);
+                    
+                    // 15 is virtual key code for 'R' on macOS keyboard layout
+                    if key_code == 15 {
+                        let is_cmd = flags.contains(CGEventFlags::CGEventFlagCommand);
+                        let is_alt = flags.contains(CGEventFlags::CGEventFlagAlternate);
+                        let is_ctrl = flags.contains(CGEventFlags::CGEventFlagControl);
+
+                        if (is_cmd || is_ctrl) && is_alt {
+                            if event_type == CGEventType::KeyDown {
+                                if !IS_HOTKEY_DOWN.swap(true, Ordering::SeqCst) {
+                                    if let Ok(guard) = APP_HANDLE_FOR_HOTKEY.lock() {
+                                        if let Some(ref handle) = *guard {
+                                            let _ = handle.emit("toggle_mic_shortcut", ());
+                                        }
+                                    }
+                                }
+                            } else if event_type == CGEventType::KeyUp {
+                                IS_HOTKEY_DOWN.store(false, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                    None
+                },
+            );
+
+            if let Ok(tap) = tap {
+                unsafe {
+                    let loop_source = tap.mach_port.create_runloop_source(0);
+                    if let Ok(source) = loop_source {
+                        CFRunLoopAddSource(CFRunLoopGetCurrent(), source.as_concrete_TypeRef(), kCFRunLoopCommonModes);
+                        tap.enable();
+                        CFRunLoopRun();
+                    }
+                }
+            }
+        });
+    }
 }
 
 fn setup_system_tray(app: &mut tauri::App) -> Result<(), String> {
+    let shortcut_label = if cfg!(target_os = "macos") {
+        "Toggle Mic (⌘+⌥+R)"
+    } else {
+        "Toggle Mic (Ctrl+Alt+R)"
+    };
+
     let open_i = MenuItem::with_id(app, "open", "Open KVIE Workspace", true, None::<&str>).map_err(|e| e.to_string())?;
     let floating_i = MenuItem::with_id(app, "toggle_floating", "Toggle Floating Mic", true, None::<&str>).map_err(|e| e.to_string())?;
-    let toggle_mic_i = MenuItem::with_id(app, "toggle_mic", "Toggle Mic (Ctrl+Alt+R)", true, None::<&str>).map_err(|e| e.to_string())?;
+    let toggle_mic_i = MenuItem::with_id(app, "toggle_mic", shortcut_label, true, None::<&str>).map_err(|e| e.to_string())?;
     let quit_i = MenuItem::with_id(app, "quit", "Exit Kritix", true, None::<&str>).map_err(|e| e.to_string())?;
 
     let menu = Menu::with_items(app, &[&open_i, &floating_i, &toggle_mic_i, &quit_i]).map_err(|e| e.to_string())?;

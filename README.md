@@ -1,10 +1,12 @@
 # 🎙️ Kritix - Voice Intelligence Engine (KVIE)
 
-> **Local-First, Ultra-Fast AI Voice Typing & System-Wide Auto-Injection Engine for Windows.**  
+> **Local-First, Ultra-Fast AI Voice Typing & System-Wide Auto-Injection Engine for Windows & macOS.**  
 > *100% Wispr Flow Parity with Complete Privacy & Zero Cloud Lag.*
 
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-black.svg?logo=apple)](https://apple.com)
+[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows)](https://microsoft.com)
 [![React](https://img.shields.io/badge/React-18-cyan.svg?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -13,9 +15,13 @@
 
 ## ✨ Overview
 
-**Kritix Voice Intelligence Engine (KVIE)** is an open-source, local-first voice productivity shell that turns your speech into polished prose across **any Windows application** (Notepad, WhatsApp Desktop, Chrome, VS Code, MS Word, Slack, Discord).
+**Kritix Voice Intelligence Engine (KVIE)** is an open-source, local-first voice productivity shell that turns your speech into polished prose across **any Windows & macOS application** (Chrome, VS Code, Slack, Discord, WhatsApp Desktop, MS Word, Notes, TextEdit, Notepad).
 
-Engineered with a high-performance **Tauri v2 + Rust** core, native **Win32 Low-Level Keyboard Hooks (`WH_KEYBOARD_LL`)**, and **Windows UI Automation COM interfaces (`IUIAutomation`)**, KVIE reads surrounding text context and executes intelligent real-time auto-editing via **Qwen2.5-1.5B-Instruct**.
+Engineered with a high-performance **Tauri v2 + Rust** core:
+- **Windows**: Native Low-Level Keyboard Hooks (`WH_KEYBOARD_LL`), Win32 Process Inspection, and Windows UI Automation COM interfaces (`IUIAutomation`).
+- **macOS**: Native `CGEventTap` global hotkey monitor, Cocoa `NSWorkspace` frontmost app detection, and macOS Accessibility APIs (`AXUIElement`).
+
+KVIE reads surrounding text context and executes intelligent real-time auto-editing via **Qwen2.5-1.5B-Instruct**.
 
 ---
 
@@ -23,13 +29,13 @@ Engineered with a high-performance **Tauri v2 + Rust** core, native **Win32 Low-
 
 | Feature / Architecture Layer | Wispr Flow | Kritix (KVIE) | Status |
 | :--- | :--- | :--- | :--- |
-| **System-Wide Global Hotkey** | ✅ `Ctrl + Alt + R` | ✅ `Ctrl + Alt + R` (Native Windows Low-Level Hook `WH_KEYBOARD_LL`) | 🟢 **COMPLETED** |
-| **Active App Detection** | ✅ Process Name & Title | ✅ Dual Win32 Process Inspector (`OpenProcess` + `K32GetProcessImageFileNameW`) | 🟢 **COMPLETED** |
-| **Real-Time Cross-App Auto-Inject** | ✅ Instant System Injection | ✅ Differential `eraseAndInject` + Clipboard Simulation | 🟢 **COMPLETED** |
+| **System-Wide Global Hotkey** | ✅ `Ctrl+Alt+R` / `⌘+⌥+R` | ✅ **Windows (`WH_KEYBOARD_LL`) & macOS (`CGEventTap`)** | 🟢 **COMPLETED** |
+| **Active App Detection** | ✅ Process Name & Title | ✅ Dual Win32 Process Inspector & macOS `NSWorkspace` | 🟢 **COMPLETED** |
+| **Real-Time Cross-App Auto-Inject** | ✅ Instant System Injection | ✅ Differential `eraseAndInject` + Clipboard Simulation (`Cmd+V` / `Ctrl+V`) | 🟢 **COMPLETED** |
 | **System Tray & Close-to-Tray** | ✅ Yes | ✅ Rust `setup_system_tray` + `CloseRequested` Intercept | 🟢 **COMPLETED** |
 | **Floating Mic Overlay Widget** | ✅ Sleek Floating Pill | ✅ Compact Floating Pill Widget (Always-On-Top, Non-Obtrusive) | 🟢 **COMPLETED** |
 | **Local / Privacy-First Engine** | ❌ Cloud-Only (Requires Internet) | ✅ **100% Local & Private** (Faster-Whisper / Whisper Large-v3 Turbo) | 🟢 **KVIE ADVANTAGE!** |
-| **Surrounding Text Context Extraction** | ✅ Reads screen text via OS Accessibility | ✅ **Windows UI Automation COM (`IUIAutomation` / `IUIAutomationTextPattern`)** | 🟢 **COMPLETED** |
+| **Surrounding Text Context Extraction** | ✅ Reads screen text via OS Accessibility | ✅ **Windows COM (`IUIAutomation`) & macOS Accessibility (`AXUIElement`)** | 🟢 **COMPLETED** |
 | **AI LLM Post-Processing (Auto-Edit)** | ✅ Strips "um/ah", fixes grammar & formatting | ✅ **Dual-Stage Engine: 0ms Regex + Qwen2.5-1.5B-Instruct Model** | 🟢 **COMPLETED** |
 | **Voice Snippets & Text Expansion** | ✅ Spoken triggers expand to long templates | ✅ **Spoken Cue Engine** (Calendly, Signatures, Addresses, Phone) | 🟢 **COMPLETED** |
 | **Voice Command Mode** | ✅ Spoken instructions (*"Make this email formal"*) | ✅ **Voice Instruction Execution Engine** (*"Make formal"*, *"Summarize"*) | 🟢 **COMPLETED** |
@@ -40,11 +46,13 @@ Engineered with a high-performance **Tauri v2 + Rust** core, native **Win32 Low-
 
 ## 🚀 Key Features
 
-### 1. ⌨️ System-Wide Low-Level Keyboard Hook (`Ctrl + Alt + R`)
-* Uses native Windows kernel driver hook `SetWindowsHookExW(WH_KEYBOARD_LL)` in Rust to capture hotkeys system-wide before any other app (Radeon, Shadowplay, Chrome) can block them.
+### 1. ⌨️ System-Wide Global Hotkey (`Ctrl + Alt + R` / `⌘ + ⌥ + R`)
+* **Windows**: Uses native Windows kernel driver hook `SetWindowsHookExW(WH_KEYBOARD_LL)`.
+* **macOS**: Uses native CoreGraphics event tap `CGEventTap` to capture `Cmd + Option + R` globally across all spaces and apps.
 
-### 2. 👁️ Windows UI Automation COM Reader (`IUIAutomation`)
-* Uses official Windows COM interface pointers (`IUIAutomationTextPattern` & `IUIAutomationValuePattern`) to read up to **500 characters of surrounding text** surrounding the active cursor in Notepad, Chrome, WhatsApp, VS Code, Word, and Slack.
+### 2. 👁️ Surrounding Text Context Reader
+* **Windows**: Uses `IUIAutomationTextPattern` & `IUIAutomationValuePattern` to read up to **500 characters** surrounding the cursor.
+* **macOS**: Uses macOS Accessibility API (`AXUIElementCopyAttributeValue` with `kAXFocusedUIElementAttribute` & `kAXValueAttribute`).
 
 ### 3. 🧠 Dual-Stage AI Auto-Edit (Qwen2.5-1.5B-Instruct)
 * **Stage 1 (0ms Regex Filter)**: Strips hesitations (*"um"*, *"uh"*, *"aah"*, *"like"*), fixes spacing, and cleans duplicate words.
@@ -72,38 +80,39 @@ Engineered with a high-performance **Tauri v2 + Rust** core, native **Win32 Low-
 ## 🏗️ System Architecture
 
 ```
-                               ┌─────────────────────────────────────────┐
-                               │     Windows OS Kernel & Active Apps     │
-                               │  (Notepad, WhatsApp, Chrome, VS Code)   │
-                               └────────────────────┬────────────────────┘
-                                                    │
-                 ┌──────────────────────────────────┴──────────────────────────────────┐
-                 │                                                                     │
-                 ▼                                                                     ▼
-   ┌───────────────────────────┐                                         ┌───────────────────────────┐
-   │  WH_KEYBOARD_LL Hotkey    │                                         │ Windows UI Automation COM │
-   │  (Ctrl + Alt + R Trigger)  │                                         │ (IUIAutomationTextPattern)│
-   └─────────────┬─────────────┘                                         └─────────────┬─────────────┘
-                 │                                                                     │
-                 └──────────────────────────────────┬──────────────────────────────────┘
-                                                    │
-                                                    ▼
-                                     ┌─────────────────────────────┐
-                                     │     Rust Tauri v2 Core      │
-                                     │   (eraseAndInject Bridge)   │
-                                     └──────────────┬──────────────┘
-                                                    │
-                                                    ▼
-                                     ┌─────────────────────────────┐
-                                     │   Qwen2.5-1.5B Auto-Edit    │
-                                     │ & Voice Snippets Engine     │
-                                     └──────────────┬──────────────┘
-                                                    │
-                                                    ▼
-                                     ┌─────────────────────────────┐
-                                     │   Compact Floating Mic Pill │
-                                     │    Overlay (React + Vite)   │
-                                     └─────────────────────────────┘
+                                ┌─────────────────────────────────────────┐
+                                │     OS Kernel & Active Target Apps      │
+                                │  (Chrome, VS Code, Slack, Notes, Word)  │
+                                └────────────────────┬────────────────────┘
+                                                     │
+                 ┌───────────────────────────────────┴───────────────────────────────────┐
+                 │                                                                       │
+                 ▼                                                                       ▼
+   ┌───────────────────────────┐                                           ┌───────────────────────────┐
+   │    Global Hotkey Engine   │                                           │  Accessibility Context    │
+   │ Windows: WH_KEYBOARD_LL   │                                           │ Windows: IUIAutomation    │
+   │ macOS: CGEventTap (⌘+⌥+R) │                                           │ macOS: AXUIElement        │
+   └─────────────┬─────────────┘                                           └─────────────┬─────────────┘
+                 │                                                                       │
+                 └───────────────────────────────────┬───────────────────────────────────┘
+                                                     │
+                                                     ▼
+                                      ┌─────────────────────────────┐
+                                      │     Rust Tauri v2 Core      │
+                                      │   (eraseAndInject Bridge)   │
+                                      └──────────────┬──────────────┘
+                                                     │
+                                                     ▼
+                                      ┌─────────────────────────────┐
+                                      │   Qwen2.5-1.5B Auto-Edit    │
+                                      │ & Voice Snippets Engine     │
+                                      └──────────────┬──────────────┘
+                                                     │
+                                                     ▼
+                                      ┌─────────────────────────────┐
+                                      │   Compact Floating Mic Pill │
+                                      │    Overlay (React + Vite)   │
+                                      └──────────────┬──────────────┘
 ```
 
 ---
@@ -111,7 +120,7 @@ Engineered with a high-performance **Tauri v2 + Rust** core, native **Win32 Low-
 ## 📦 Quick Start & Installation
 
 ### Prerequisites
-* **Windows 10/11**
+* **macOS** (11.0+ Big Sur / Monterey / Ventura / Sonoma / Sequoia on Apple Silicon or Intel) or **Windows** (10/11)
 * **Node.js** (v18+) & **npm**
 * **Rust** (1.75+) with `cargo`
 * **Ollama** (Optional for local Qwen2.5 execution: `ollama run qwen2.5:1.5b`)
@@ -134,6 +143,19 @@ cd ..
 # 4. Run KVIE Desktop Application
 npm run tauri:dev
 ```
+
+### Packaging & Releases
+
+```bash
+# Build for macOS (.dmg and .app bundle)
+npm run tauri:build:mac
+
+# Build for Windows (.exe NSIS installer and .msi)
+npm run tauri:build:win
+```
+
+> [!NOTE]
+> **macOS Permissions**: When running on macOS for the first time, grant **Accessibility** permissions in `System Settings > Privacy & Security > Accessibility` to allow KVIE to read focused context and perform auto-injection.
 
 ---
 

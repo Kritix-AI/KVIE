@@ -311,7 +311,7 @@ const App = () => {
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR')) {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR')) {
         e.preventDefault()
         const currentEnabled = localStorage.getItem('kvie_global_hotkey_enabled') !== 'false'
         if (!currentEnabled) return
@@ -934,8 +934,12 @@ const App = () => {
 
                   <div className="py-4 flex items-center justify-between">
                     <div>
-                      <p className="font-medium text-zinc-200">Global System-Wide Shortcut (Ctrl + Alt + R)</p>
-                      <p className="text-xs text-zinc-500">Pressing Ctrl + Alt + R anywhere on Windows turns mic ON or OFF instantly</p>
+                      <p className="font-medium text-zinc-200">
+                        Global System-Wide Shortcut ({typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/.test(navigator.userAgent || '') ? '⌘ + ⌥ + R' : 'Ctrl + Alt + R'})
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        Pressing {typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/.test(navigator.userAgent || '') ? '⌘ + ⌥ + R on macOS' : 'Ctrl + Alt + R on Windows'} turns mic ON or OFF instantly
+                      </p>
                     </div>
                     <button
                       onClick={() => setIsGlobalHotkeyEnabled(prev => !prev)}

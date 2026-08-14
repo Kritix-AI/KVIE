@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Kritix Voice Intelligence Engine requires microphone access for real-time AI speech transcription.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Kritix uses speech recognition for local voice productivity.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Kritix needs accessibility permissions to auto-inject text and extract context from active applications.</string>
+</dict>
+</plist>
