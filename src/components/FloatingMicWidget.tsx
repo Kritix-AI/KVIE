@@ -15,6 +15,7 @@ import {
   ChevronRight,
   GripVertical,
   Sparkles,
+  Languages,
 } from 'lucide-react'
 import { tauriBridge } from '../lib/tauriBridge'
 import './FloatingMicWidget.css'
@@ -24,10 +25,13 @@ interface FloatingMicWidgetProps {
   isSupported: boolean
   isUniversalMode: boolean
   isCommandMode?: boolean
+  isTranslationEnabled?: boolean
+  targetLanguageName?: string
   isDesktop: boolean
   onToggleListening: () => void
   onToggleUniversalMode: () => void
   onToggleCommandMode?: () => void
+  onToggleTranslation?: () => void
   onInjectCurrentText: () => void
   onClearText: () => void
   interimTranscript?: string
@@ -43,10 +47,13 @@ export const FloatingMicWidget: React.FC<FloatingMicWidgetProps> = ({
   isSupported,
   isUniversalMode,
   isCommandMode,
+  isTranslationEnabled = false,
+  targetLanguageName = 'English',
   isDesktop,
   onToggleListening,
   onToggleUniversalMode,
   onToggleCommandMode,
+  onToggleTranslation,
   onInjectCurrentText,
   onClearText,
   interimTranscript,
@@ -236,7 +243,22 @@ export const FloatingMicWidget: React.FC<FloatingMicWidgetProps> = ({
                 }
               >
                 <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-                {isCommandMode ? 'Command Mode' : 'Dictate'}
+                {isCommandMode ? 'Command' : 'Dictate'}
+              </button>
+            )}
+
+            {onToggleTranslation && (
+              <button
+                className={`floating-action-btn ${isTranslationEnabled ? 'active-command-mode' : ''}`}
+                onClick={onToggleTranslation}
+                title={
+                  isTranslationEnabled
+                    ? `Live Translation ON -> ${targetLanguageName} (Translates voice in real-time)`
+                    : 'Live Translation OFF (Captures speech in original language)'
+                }
+              >
+                <Languages className="h-3.5 w-3.5 text-cyan-400" />
+                {isTranslationEnabled ? `-> ${targetLanguageName}` : 'Translate'}
               </button>
             )}
 

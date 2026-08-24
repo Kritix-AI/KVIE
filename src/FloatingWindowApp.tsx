@@ -7,7 +7,10 @@ import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
 import { runQwenAutoEdit } from './lib/autoEdit'
 import { isVoiceCommandIntent, executeVoiceCommand } from './lib/voiceCommandEngine'
-import { IncrementalTypingSession } from './lib/incrementalTypingEngine'
+import { IncrementalTypingSession, processSpokenVoiceText } from './lib/incrementalTypingEngine'
+import { applyCustomDictionary } from './lib/customDictionary'
+import { expandVoiceSnippets } from './lib/snippetsEngine'
+import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import FloatingMicWidget from './components/FloatingMicWidget'
 
 export const FloatingWindowApp: React.FC = () => {
@@ -21,6 +24,25 @@ export const FloatingWindowApp: React.FC = () => {
     const saved = localStorage.getItem('kvie_universal_mode')
     return saved !== null ? saved === 'true' : true
   })
+
+  const [isTranslationEnabled, setIsTranslationEnabled] = useState<boolean>(() => getTranslationSettings().isEnabled)
+  const [targetLanguage, setTargetLanguage] = useState<string>(() => getTranslationSettings().targetLanguage)
+
+  useEffect(() => {
+    const syncTranslation = () => {
+      const current = getTranslationSettings()
+      setIsTranslationEnabled(current.isEnabled)
+      setTargetLanguage(current.targetLanguage)
+    }
+    window.addEventListener('storage', syncTranslation)
+    return () => window.removeEventListener('storage', syncTranslation)
+  }, [])
+
+  const handleToggleTranslation = () => {
+    const next = !isTranslationEnabled
+    setIsTranslationEnabled(next)
+    saveTranslationSettings(next, targetLanguage)
+  }
 
   const typingSessionRef = useRef<IncrementalTypingSession>(new IncrementalTypingSession())
   const lastFinalTranscriptRef = useRef('')
@@ -120,7 +142,7 @@ export const FloatingWindowApp: React.FC = () => {
     }
   }, [speech.isListening, isCommandMode])
 
-  // Smart Incremental Real-time live streaming typing + tail word overlap analysis
+  // Smart Incremental Real-time live streaming typing + Custom Dictionary + Snippets + Live Translation
   useEffect(() => {
     if (!isUniversalMode || !speech.isListening) return
 
@@ -129,9 +151,10 @@ export const FloatingWindowApp: React.FC = () => {
     const currentInterim = speech.interimTranscript || ''
     const latestSeg = localVoice.latestSegment || ''
 
+    let isCancelled = false
+
     // Case 1: Final segment arrived (e.g. after a pause)
     if (currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
-      // Find the new portion of finalized transcript
       let newFinalPortion = currentFinal
       if (currentFinal.startsWith(lastFinalTranscriptRef.current)) {
         newFinalPortion = currentFinal.slice(lastFinalTranscriptRef.current.length).trim()
@@ -142,21 +165,31 @@ export const FloatingWindowApp: React.FC = () => {
       lastFinalTranscriptRef.current = currentFinal
 
       if (newFinalPortion) {
-        const delta = session.processSegment(newFinalPortion, true)
-        if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-          void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
-            setInjectionMessage('Sentence typed & saved')
-          }).catch(err => {
-            setInjectionMessage(err instanceof Error ? err.message : String(err))
+        void (async () => {
+          // Process through Custom Dictionary -> Snippets -> Translation
+          const processedFinal = await processSpokenVoiceText(newFinalPortion, {
+            applyTranslation: isTranslationEnabled,
+            targetLanguage,
           })
-        }
+          if (isCancelled) return
+
+          const delta = session.processSegment(processedFinal, true)
+          if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+            await tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText)
+            setInjectionMessage(isTranslationEnabled ? 'Translated & typed' : 'Typed & saved')
+          }
+        })().catch(err => {
+          setInjectionMessage(err instanceof Error ? err.message : String(err))
+        })
       }
-      return
+      return () => { isCancelled = true }
     }
 
     // Case 2: Active Interim speech clause while speaking
     if (currentInterim) {
-      const delta = session.processSegment(currentInterim, false)
+      // Instant synchronous dictionary correction & snippet expansion on interim preview
+      const quickInterim = applyCustomDictionary(expandVoiceSnippets(currentInterim).expandedText)
+      const delta = session.processSegment(quickInterim, false)
       if (delta.eraseCount > 0 || delta.appendText.length > 0) {
         void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
           setInjectionMessage('Typing...')
@@ -165,7 +198,9 @@ export const FloatingWindowApp: React.FC = () => {
         })
       }
     }
-  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode])
+
+    return () => { isCancelled = true }
+  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode, isTranslationEnabled, targetLanguage])
 
 
   const handleToggleListening = () => {
@@ -185,8 +220,12 @@ export const FloatingWindowApp: React.FC = () => {
   const injectDraft = async () => {
     const textToInject = speech.interimTranscript || speech.transcript || localVoice.latestSegment
     if (!textToInject.trim()) return
-    await saveVoiceSession(textToInject)
-    await tauriBridge.eraseAndInject(0, textToInject)
+    const processed = await processSpokenVoiceText(textToInject, {
+      applyTranslation: isTranslationEnabled,
+      targetLanguage,
+    })
+    await saveVoiceSession(processed)
+    await tauriBridge.eraseAndInject(0, processed)
   }
 
   return (
@@ -209,11 +248,14 @@ export const FloatingWindowApp: React.FC = () => {
         isSupported={speech.isSupported}
         isUniversalMode={isUniversalMode}
         isCommandMode={isCommandMode}
+        isTranslationEnabled={isTranslationEnabled}
+        targetLanguageName={SUPPORTED_LANGUAGES.find(l => l.code === targetLanguage)?.name || targetLanguage}
         isDesktop={true}
         isStandalone={true}
         onToggleListening={handleToggleListening}
         onToggleUniversalMode={() => setIsUniversalMode(prev => !prev)}
         onToggleCommandMode={() => setIsCommandMode(prev => !prev)}
+        onToggleTranslation={handleToggleTranslation}
         onInjectCurrentText={() => void injectDraft()}
         onClearText={clearAll}
         interimTranscript={speech.interimTranscript}

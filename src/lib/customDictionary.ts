@@ -48,17 +48,19 @@ export function applyCustomDictionary(text: string): string {
     const targetWord = item.word.trim()
     if (!targetWord) continue
 
-    // Replace phonetic variants / misspellings
-    for (const variant of item.phoneticVariants) {
-      const vTrim = variant.trim()
-      if (!vTrim) continue
-      const regex = new RegExp(`\\b${escapeRegExp(vTrim)}\\b`, 'gi')
-      resultText = resultText.replace(regex, targetWord)
+    // Replace phonetic variants / misspellings (e.g. "critics", "kritiks" -> "Kritix")
+    if (Array.isArray(item.phoneticVariants)) {
+      for (const variant of item.phoneticVariants) {
+        const vTrim = variant.trim()
+        if (!vTrim) continue
+        const regex = new RegExp(`(^|\\s|[.,!?;:()"-])${escapeRegExp(vTrim)}(?=$|\\s|[.,!?;:()"-])`, 'gi')
+        resultText = resultText.replace(regex, (_, prefix) => `${prefix}${targetWord}`)
+      }
     }
 
-    // Replace case-insensitive occurrences of exact target word with correct casing
-    const exactRegex = new RegExp(`\\b${escapeRegExp(targetWord)}\\b`, 'gi')
-    resultText = resultText.replace(exactRegex, targetWord)
+    // Replace case-insensitive occurrences of exact target word with correct casing (e.g. "kritix" -> "Kritix")
+    const exactRegex = new RegExp(`(^|\\s|[.,!?;:()"-])${escapeRegExp(targetWord)}(?=$|\\s|[.,!?;:()"-])`, 'gi')
+    resultText = resultText.replace(exactRegex, (_, prefix) => `${prefix}${targetWord}`)
   }
 
   return resultText

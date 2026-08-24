@@ -8,6 +8,10 @@
  * - Automatically handles smart spacing and punctuation attachment between sentences.
  */
 
+import { applyCustomDictionary } from './customDictionary'
+import { expandVoiceSnippets } from './snippetsEngine'
+import { getTranslationSettings, translateText } from './translationEngine'
+
 export const normalizeWord = (w: string): string => {
   return w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 }
@@ -233,3 +237,50 @@ export class IncrementalTypingSession {
     }
   }
 }
+
+/**
+ * Transforms raw transcribed speech through the full KVIE intelligence pipeline:
+ * 1. Personalized Custom Dictionary & Jargon Auto-Correction
+ * 2. Voice Snippets Expansion
+ * 3. Real-Time Multilingual Live Translation (if enabled)
+ */
+export async function processSpokenVoiceText(
+  rawText: string,
+  options: {
+    applyDictionary?: boolean
+    expandSnippets?: boolean
+    applyTranslation?: boolean
+    targetLanguage?: string
+  } = {}
+): Promise<string> {
+  const trimmed = rawText.trim()
+  if (!trimmed) return rawText
+
+  // Step 1: Personalized Custom Dictionary & Vocabulary Bias
+  let text = options.applyDictionary !== false ? applyCustomDictionary(trimmed) : trimmed
+
+  // Step 2: Voice Snippets Expansion
+  if (options.expandSnippets !== false) {
+    const expanded = expandVoiceSnippets(text)
+    text = expanded.expandedText
+  }
+
+  // Step 3: Live Voice Translation
+  const translationConfig = getTranslationSettings()
+  const isTransEnabled = options.applyTranslation ?? translationConfig.isEnabled
+  const targetLang = options.targetLanguage ?? translationConfig.targetLanguage
+
+  if (isTransEnabled && targetLang) {
+    try {
+      const translated = await translateText(text, targetLang)
+      if (translated && translated.trim()) {
+        text = translated.trim()
+      }
+    } catch {
+      // Keep dictionary-corrected text on translation error
+    }
+  }
+
+  return text
+}
+

@@ -38,9 +38,10 @@ import { useLocalStreamingVoice } from './hooks/useLocalStreamingVoice'
 import { useAppTheme } from './hooks/useAppTheme'
 import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
-import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets } from './lib/snippetsEngine'
-import { CustomWord, getCustomDictionary, saveCustomDictionary } from './lib/customDictionary'
+import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets } from './lib/snippetsEngine'
+import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
+import { processSpokenVoiceText } from './lib/incrementalTypingEngine'
 
 const navItems = ['Workspace', 'Sessions', 'Models', 'Settings']
 
@@ -359,15 +360,49 @@ const App = () => {
     window.setTimeout(() => setInjectionMessage(null), 3000)
   }
 
-  const activeDocumentText = (localVoice.isAvailable && localVoice.documentText)
+  const [translatedDocumentText, setTranslatedDocumentText] = useState('')
+
+  useEffect(() => {
+    const raw = (localVoice.isAvailable && localVoice.documentText)
+      ? localVoice.documentText
+      : (speech.transcript || document.text)
+
+    if (!raw.trim()) {
+      setTranslatedDocumentText('')
+      return
+    }
+
+    let isCancelled = false
+    void (async () => {
+      const processed = await processSpokenVoiceText(raw, {
+        applyTranslation: isTranslationEnabled,
+        targetLanguage,
+      })
+      if (!isCancelled) {
+        setTranslatedDocumentText(processed)
+      }
+    })()
+
+    return () => { isCancelled = true }
+  }, [speech.transcript, localVoice.documentText, document.text, isTranslationEnabled, targetLanguage, customWords, snippets])
+
+  const rawDocumentText = (localVoice.isAvailable && localVoice.documentText)
     ? localVoice.documentText
     : (speech.transcript || document.text)
+
+  const activeDocumentText = translatedDocumentText || applyCustomDictionary(expandVoiceSnippets(rawDocumentText).expandedText)
+
+  const activeInterimText = speech.interimTranscript
+    ? applyCustomDictionary(expandVoiceSnippets(speech.interimTranscript).expandedText)
+    : ''
+
   const wordCount = useMemo(() => activeDocumentText.trim() ? activeDocumentText.trim().split(/\s+/).length : 0, [activeDocumentText])
 
   const clearAll = () => {
     speech.clearTranscript()
     localVoice.clearTranscript()
     browserSpeech.clearTranscript()
+    setTranslatedDocumentText('')
     lastCommittedRef.current = ''
     void document.apply({ action: 'clear' })
   }
@@ -599,11 +634,11 @@ const App = () => {
                   </div>
                 </div>
                 <div aria-live="polite" className="min-h-[160px] whitespace-pre-wrap text-xl leading-relaxed text-zinc-100 sm:text-2xl">
-                  {activeDocumentText || speech.interimTranscript ? (
+                  {activeDocumentText || activeInterimText ? (
                     <>
                       {activeDocumentText}
-                      {activeDocumentText && speech.interimTranscript && !/[\s\n]$/.test(activeDocumentText) ? ' ' : ''}
-                      <span style={{ color: theme.accentColor }} className="font-normal">{speech.interimTranscript}</span>
+                      {activeDocumentText && activeInterimText && !/[\s\n]$/.test(activeDocumentText) ? ' ' : ''}
+                      <span style={{ color: theme.accentColor }} className="font-normal">{activeInterimText}</span>
                     </>
                   ) : (
                     <span className="text-zinc-600 font-light">Press the microphone button or floating mic widget and start speaking...</span>
