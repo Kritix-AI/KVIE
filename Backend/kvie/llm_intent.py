@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from .document_state import DocumentState
 from .intent_engine import IntentDecision, IntentEngine
 
-ALLOWED_ACTIONS = {"append", "replace_sentence", "delete_sentence", "insert_after_sentence", "undo", "redo", "clear", "translate", "rewrite", "format", "ignore"}
+ALLOWED_ACTIONS = {"append", "replace_sentence", "delete_sentence", "insert_after_sentence", "undo", "redo", "translate", "rewrite", "format", "ignore"}
 
 
 class OllamaIntentClassifier:

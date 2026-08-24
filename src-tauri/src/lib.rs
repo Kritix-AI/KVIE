@@ -192,12 +192,15 @@ fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
         }
     }
     if !text.is_empty() {
-        let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
-        clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
-        std::thread::sleep(std::time::Duration::from_millis(25));
-        enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
-        enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
-        enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
+        if text.len() <= 20 && !text.contains('\n') {
+            let _ = enigo.text(&text);
+        } else {
+            let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
+            clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
+            enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
+            enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
+            enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
 }

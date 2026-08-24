@@ -42,7 +42,6 @@ import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets 
 import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import { processSpokenVoiceText } from './lib/incrementalTypingEngine'
-import { executeVoiceCommand, isVoiceCommandIntent } from './lib/voiceCommandEngine'
 
 const navItems = ['Workspace', 'Sessions', 'Models', 'Settings']
 
@@ -408,33 +407,6 @@ const App = () => {
     void document.apply({ action: 'clear' })
   }
 
-  const [isCommandRunning, setIsCommandRunning] = useState(false)
-
-  const handleExecuteCommand = async (commandCue: string) => {
-    const targetText = activeDocumentText.trim()
-    if (!targetText && !commandCue) return
-    setIsCommandRunning(true)
-    setInjectionMessage(`Executing: "${commandCue}"...`)
-    try {
-      const res = await executeVoiceCommand(commandCue, targetText, 'KVIE Workspace')
-      if (res.isSuccess) {
-        if (res.action === 'clear') {
-          clearAll()
-        } else if (res.transformedText) {
-          void document.apply({ action: 'replace', text: res.transformedText })
-          setTranslatedDocumentText(res.transformedText)
-          void saveVoiceSession(`[Command: ${commandCue}] -> ${res.transformedText}`, 'KVIE Workspace')
-        }
-        setInjectionMessage(`Applied: ${res.intent || 'Command'}`)
-      }
-    } catch {
-      setInjectionMessage('Command execution failed')
-    } finally {
-      setIsCommandRunning(false)
-      window.setTimeout(() => setInjectionMessage(null), 3000)
-    }
-  }
-
   const injectDraft = async (overrideText?: string) => {
     const textToInject = overrideText || activeDocumentText
     if (!textToInject.trim()) return
@@ -672,31 +644,6 @@ const App = () => {
                     <span className="text-zinc-600 font-light">Press the microphone button or floating mic widget and start speaking...</span>
                   )}
                 </div>
-
-                {/* AI Voice Command Action Chips */}
-                <div className="mt-6 pt-4 border-t border-line/40 flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mr-1 flex items-center gap-1">
-                    <Sparkles className="h-3 w-3 text-purple-400" /> AI Commands:
-                  </span>
-                  {[
-                    { label: '✨ Make Formal', cmd: 'make this formal' },
-                    { label: '📋 Summarize', cmd: 'summarize into bullet points' },
-                    { label: '🛠️ Fix Grammar', cmd: 'fix grammar and spelling mistakes' },
-                    { label: '✂️ Shorten', cmd: 'shorten this and make it concise' },
-                    { label: '➕ Expand', cmd: 'expand this with more details' },
-                    { label: '🧹 Clear All', cmd: 'clear all' },
-                  ].map(chip => (
-                    <button
-                      key={chip.cmd}
-                      onClick={() => void handleExecuteCommand(chip.cmd)}
-                      disabled={isCommandRunning || (!activeDocumentText.trim() && chip.cmd !== 'clear all')}
-                      className="rounded-xl border border-line/60 bg-zinc-900/60 px-3 py-1.5 text-xs text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
-                </div>
-
                 <AnimatePresence>
                   {(speech.error || document.error) && (
                     <motion.p initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="absolute bottom-4 left-8 text-xs text-rose-400">

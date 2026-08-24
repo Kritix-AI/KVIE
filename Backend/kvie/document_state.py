@@ -83,9 +83,6 @@ class DocumentState:
     def delete(self, start: int, end: int, metadata: Optional[Dict[str, Any]] = None) -> DocumentSnapshot:
         return self.replace(start, end, "", metadata={**(metadata or {}), "deleted_range": [start, end]})
 
-    def clear(self, metadata: Optional[Dict[str, Any]] = None) -> DocumentSnapshot:
-        return self._commit("", "clear", metadata or {}, cursor=0)
-
     def replace_sentence(self, index: int, replacement: str, metadata: Optional[Dict[str, Any]] = None) -> DocumentSnapshot:
         spans = self.sentence_spans()
         if index < 0 or index >= len(spans):

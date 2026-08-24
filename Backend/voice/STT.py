@@ -437,6 +437,8 @@ def _transcribe_faster_whisper(model, arr, lang_arg, beam_size: int = 1):
         vad_parameters=dict(min_silence_duration_ms=300, speech_pad_ms=100),
         no_speech_threshold=0.6,
         log_prob_threshold=-1.0,
+        condition_on_previous_text=False,
+        without_timestamps=True,
         initial_prompt=_HOTWORD_PROMPT,
     )
 

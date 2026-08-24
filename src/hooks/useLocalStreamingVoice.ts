@@ -79,7 +79,7 @@ export const useLocalStreamingVoice = () => {
       socket.send(JSON.stringify({ type: 'start', language: 'auto' }))
       const context = new AudioContext()
       const source = context.createMediaStreamSource(stream)
-      const processor = context.createScriptProcessor(4096, 1, 1)
+      const processor = context.createScriptProcessor(1024, 1, 1)
       processor.onaudioprocess = event => { if (socket.readyState === WebSocket.OPEN) socket.send(toPCM16(downsample(event.inputBuffer.getChannelData(0), context.sampleRate, 16000))) }
       source.connect(processor)
       processor.connect(context.destination)

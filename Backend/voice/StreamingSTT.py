@@ -37,8 +37,8 @@ class StreamingSTTConfig:
     sample_rate: int = 16_000
     channels: int = 1
     sample_width_bytes: int = 2
-    window_ms: int = 2_000
-    overlap_ms: int = 500
+    window_ms: int = 800
+    overlap_ms: int = 250
     language: str = "auto"
 
     @property
