@@ -195,18 +195,9 @@ fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
         let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
         clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
         std::thread::sleep(std::time::Duration::from_millis(25));
-        #[cfg(target_os = "macos")]
-        {
-            enigo.key(Key::Meta, Direction::Press).map_err(|error| error.to_string())?;
-            enigo.key(Key::Unicode('v'), Direction::Click).map_err(|error| error.to_string())?;
-            enigo.key(Key::Meta, Direction::Release).map_err(|error| error.to_string())?;
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
-            enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
-            enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
-        }
+        enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
+        enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
+        enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -246,7 +237,6 @@ fn toggle_floating_mic(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
 fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
     #[cfg(target_os = "windows")]
     {
@@ -335,83 +325,8 @@ fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
             process_name,
         })
     }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = hwnd;
-        get_macos_frontmost_app()
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        let _ = hwnd;
-        None
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn get_macos_frontmost_app() -> Option<ActiveAppInfo> {
-    use std::ffi::{c_char, c_void, CStr};
-
-    type Id = *mut c_void;
-    type Sel = *mut c_void;
-
-    #[link(name = "objc", kind = "dylib")]
-    extern "C" {
-        fn objc_getClass(name: *const c_char) -> Id;
-        fn sel_registerName(name: *const c_char) -> Sel;
-        fn objc_msgSend(receiver: Id, op: Sel, ...) -> Id;
-    }
-
-    unsafe {
-        let cls_nsworkspace = objc_getClass(b"NSWorkspace\0".as_ptr() as _);
-        if cls_nsworkspace.is_null() {
-            return None;
-        }
-
-        let sel_shared = sel_registerName(b"sharedWorkspace\0".as_ptr() as _);
-        let workspace = objc_msgSend(cls_nsworkspace, sel_shared);
-        if workspace.is_null() {
-            return None;
-        }
-
-        let sel_frontmost = sel_registerName(b"frontmostApplication\0".as_ptr() as _);
-        let frontmost = objc_msgSend(workspace, sel_frontmost);
-        if frontmost.is_null() {
-            return None;
-        }
-
-        let sel_loc_name = sel_registerName(b"localizedName\0".as_ptr() as _);
-        let localized_name = objc_msgSend(frontmost, sel_loc_name);
-
-        let sel_utf8 = sel_registerName(b"UTF8String\0".as_ptr() as _);
-        let app_name = if !localized_name.is_null() {
-            let utf8_ptr = objc_msgSend(localized_name, sel_utf8) as *const c_char;
-            if !utf8_ptr.is_null() {
-                CStr::from_ptr(utf8_ptr).to_string_lossy().into_owned()
-            } else {
-                "Active App".to_string()
-            }
-        } else {
-            "Active App".to_string()
-        };
-
-        let sel_bundle_id = sel_registerName(b"bundleIdentifier\0".as_ptr() as _);
-        let bundle_id = objc_msgSend(frontmost, sel_bundle_id);
-        let process_name = if !bundle_id.is_null() {
-            let utf8_ptr = objc_msgSend(bundle_id, sel_utf8) as *const c_char;
-            if !utf8_ptr.is_null() {
-                CStr::from_ptr(utf8_ptr).to_string_lossy().into_owned()
-            } else {
-                app_name.clone()
-            }
-        } else {
-            app_name.clone()
-        };
-
-        Some(ActiveAppInfo {
-            app_name,
-            process_name,
-        })
-    }
+    #[cfg(not(target_os = "windows"))]
+    None
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -419,84 +334,6 @@ pub struct ActiveAppContext {
     pub app_name: String,
     pub process_name: String,
     pub surrounding_text: String,
-}
-
-#[cfg(target_os = "macos")]
-fn extract_macos_accessibility_text() -> String {
-    use core_foundation::base::TCFType;
-    use core_foundation::string::CFString;
-    use std::ffi::c_void;
-
-    #[repr(C)]
-    struct __AXUIElement(c_void);
-    type AXUIElementRef = *mut __AXUIElement;
-    type AXError = i32;
-
-    #[link(name = "ApplicationServices", kind = "framework")]
-    extern "C" {
-        fn AXUIElementCreateSystemWide() -> AXUIElementRef;
-        fn AXUIElementCopyAttributeValue(
-            element: AXUIElementRef,
-            attribute: core_foundation::string::CFStringRef,
-            value: *mut core_foundation::base::CFTypeRef,
-        ) -> AXError;
-    }
-
-    unsafe {
-        let system_wide = AXUIElementCreateSystemWide();
-        if system_wide.is_null() {
-            return String::new();
-        }
-
-        let focused_attr = CFString::new("AXFocusedUIElement");
-        let mut focused_element_ref: core_foundation::base::CFTypeRef = std::ptr::null_mut();
-        let res = AXUIElementCopyAttributeValue(
-            system_wide,
-            focused_attr.as_concrete_TypeRef(),
-            &mut focused_element_ref,
-        );
-
-        if res != 0 || focused_element_ref.is_null() {
-            core_foundation::base::CFRelease(system_wide as _);
-            return String::new();
-        }
-
-        let focused_element = focused_element_ref as AXUIElementRef;
-        let value_attr = CFString::new("AXValue");
-        let mut value_ref: core_foundation::base::CFTypeRef = std::ptr::null_mut();
-        let val_res = AXUIElementCopyAttributeValue(
-            focused_element,
-            value_attr.as_concrete_TypeRef(),
-            &mut value_ref,
-        );
-
-        let mut extracted = String::new();
-        if val_res == 0 && !value_ref.is_null() {
-            let cf_str = CFString::wrap_under_create_rule(value_ref as _);
-            extracted = cf_str.to_string();
-        } else {
-            let selected_attr = CFString::new("AXSelectedText");
-            let mut sel_ref: core_foundation::base::CFTypeRef = std::ptr::null_mut();
-            let sel_res = AXUIElementCopyAttributeValue(
-                focused_element,
-                selected_attr.as_concrete_TypeRef(),
-                &mut sel_ref,
-            );
-            if sel_res == 0 && !sel_ref.is_null() {
-                let cf_str = CFString::wrap_under_create_rule(sel_ref as _);
-                extracted = cf_str.to_string();
-            }
-        }
-
-        core_foundation::base::CFRelease(focused_element as _);
-        core_foundation::base::CFRelease(system_wide as _);
-
-        if extracted.chars().count() > 500 {
-            extracted.chars().take(500).collect()
-        } else {
-            extracted.trim().to_string()
-        }
-    }
 }
 
 fn extract_focused_surrounding_text() -> String {
@@ -540,11 +377,7 @@ fn extract_focused_surrounding_text() -> String {
             return extracted.trim().to_string();
         }
     }
-    #[cfg(target_os = "macos")]
-    {
-        extract_macos_accessibility_text()
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     String::new()
 }
 
@@ -615,23 +448,6 @@ fn start_active_app_tracker() {
             }
         });
     }
-
-    #[cfg(target_os = "macos")]
-    {
-        std::thread::spawn(|| {
-            loop {
-                if let Some(info) = get_macos_frontmost_app() {
-                    let proc_lower = info.process_name.to_lowercase();
-                    if !proc_lower.contains("kritix") {
-                        if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
-                            *guard = Some(info);
-                        }
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        });
-    }
 }
 
 fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
@@ -699,113 +515,12 @@ fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
             }
         });
     }
-
-    #[cfg(target_os = "macos")]
-    {
-        use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopRun};
-        use std::ffi::c_void;
-        use std::sync::atomic::Ordering;
-
-        type CGEventTapProxy = *mut c_void;
-        type CGEventType = u32;
-        type CGEventRef = *mut c_void;
-        type CFMachPortRef = *mut c_void;
-        type CFRunLoopSourceRef = *mut c_void;
-
-        const K_CG_EVENT_KEY_DOWN: u32 = 10;
-        const K_CG_EVENT_KEY_UP: u32 = 11;
-        const K_CG_EVENT_MASK_FOR_ALL_KEYS: u64 = (1 << K_CG_EVENT_KEY_DOWN) | (1 << K_CG_EVENT_KEY_UP);
-
-        const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
-        const K_CG_EVENT_FLAG_MASK_ALTERNATE: u64 = 0x00080000;
-        const K_CG_EVENT_FLAG_MASK_CONTROL: u64 = 0x00040000;
-        const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 14;
-
-        #[link(name = "CoreGraphics", kind = "framework")]
-        extern "C" {
-            fn CGEventTapCreate(
-                tap: u32,
-                place: u32,
-                options: u32,
-                events_of_interest: u64,
-                callback: unsafe extern "C" fn(CGEventTapProxy, CGEventType, CGEventRef, *mut c_void) -> CGEventRef,
-                user_info: *mut c_void,
-            ) -> CFMachPortRef;
-
-            fn CGEventGetFlags(event: CGEventRef) -> u64;
-            fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
-            fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
-            fn CFMachPortCreateRunLoopSource(allocator: *const c_void, port: CFMachPortRef, order: isize) -> CFRunLoopSourceRef;
-        }
-
-        unsafe extern "C" fn event_tap_callback(
-            _proxy: CGEventTapProxy,
-            event_type: CGEventType,
-            event: CGEventRef,
-            _refcon: *mut c_void,
-        ) -> CGEventRef {
-            if event.is_null() {
-                return event;
-            }
-
-            let key_code = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
-            // 15 is virtual key code for 'R' on macOS layout
-            if key_code == 15 {
-                let flags = CGEventGetFlags(event);
-                let is_cmd = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
-                let is_alt = (flags & K_CG_EVENT_FLAG_MASK_ALTERNATE) != 0;
-                let is_ctrl = (flags & K_CG_EVENT_FLAG_MASK_CONTROL) != 0;
-
-                if (is_cmd || is_ctrl) && is_alt {
-                    if event_type == K_CG_EVENT_KEY_DOWN {
-                        if !IS_HOTKEY_DOWN.swap(true, Ordering::SeqCst) {
-                            if let Ok(guard) = APP_HANDLE_FOR_HOTKEY.lock() {
-                                if let Some(ref handle) = *guard {
-                                    let _ = handle.emit("toggle_mic_shortcut", ());
-                                }
-                            }
-                        }
-                    } else if event_type == K_CG_EVENT_KEY_UP {
-                        IS_HOTKEY_DOWN.store(false, Ordering::SeqCst);
-                    }
-                }
-            }
-
-            event
-        }
-
-        std::thread::spawn(|| unsafe {
-            let tap = CGEventTapCreate(
-                0,
-                0,
-                1,
-                K_CG_EVENT_MASK_FOR_ALL_KEYS,
-                event_tap_callback,
-                std::ptr::null_mut(),
-            );
-
-            if !tap.is_null() {
-                let run_loop_source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
-                if !run_loop_source.is_null() {
-                    CFRunLoopAddSource(CFRunLoopGetCurrent(), run_loop_source as _, kCFRunLoopCommonModes);
-                    CGEventTapEnable(tap, true);
-                    CFRunLoopRun();
-                }
-            }
-        });
-    }
 }
 
 fn setup_system_tray(app: &mut tauri::App) -> Result<(), String> {
-    let shortcut_label = if cfg!(target_os = "macos") {
-        "Toggle Mic (⌘+⌥+R)"
-    } else {
-        "Toggle Mic (Ctrl+Alt+R)"
-    };
-
     let open_i = MenuItem::with_id(app, "open", "Open KVIE Workspace", true, None::<&str>).map_err(|e| e.to_string())?;
     let floating_i = MenuItem::with_id(app, "toggle_floating", "Toggle Floating Mic", true, None::<&str>).map_err(|e| e.to_string())?;
-    let toggle_mic_i = MenuItem::with_id(app, "toggle_mic", shortcut_label, true, None::<&str>).map_err(|e| e.to_string())?;
+    let toggle_mic_i = MenuItem::with_id(app, "toggle_mic", "Toggle Mic (Ctrl+Alt+R)", true, None::<&str>).map_err(|e| e.to_string())?;
     let quit_i = MenuItem::with_id(app, "quit", "Exit Kritix", true, None::<&str>).map_err(|e| e.to_string())?;
 
     let menu = Menu::with_items(app, &[&open_i, &floating_i, &toggle_mic_i, &quit_i]).map_err(|e| e.to_string())?;

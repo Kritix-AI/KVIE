@@ -7,6 +7,7 @@ import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
 import { runQwenAutoEdit } from './lib/autoEdit'
 import { isVoiceCommandIntent, executeVoiceCommand } from './lib/voiceCommandEngine'
+import { IncrementalTypingSession } from './lib/incrementalTypingEngine'
 import FloatingMicWidget from './components/FloatingMicWidget'
 
 export const FloatingWindowApp: React.FC = () => {
@@ -21,7 +22,8 @@ export const FloatingWindowApp: React.FC = () => {
     return saved !== null ? saved === 'true' : true
   })
 
-  const lastTypedTextRef = useRef('')
+  const typingSessionRef = useRef<IncrementalTypingSession>(new IncrementalTypingSession())
+  const lastFinalTranscriptRef = useRef('')
 
   useEffect(() => {
     document.body.classList.add('floating-window-mode')
@@ -43,8 +45,9 @@ export const FloatingWindowApp: React.FC = () => {
       if (!isEnabled) return
 
       if (speech.isListening) {
-        if (lastTypedTextRef.current.trim()) {
-          void saveVoiceSession(lastTypedTextRef.current)
+        const fullText = typingSessionRef.current.getFullText()
+        if (fullText) {
+          void saveVoiceSession(fullText)
         }
         browserSpeech.stopListening()
         if (localVoice.isAvailable) localVoice.stopListening()
@@ -64,13 +67,15 @@ export const FloatingWindowApp: React.FC = () => {
   }, [speech.isListening, browserSpeech, localVoice])
 
   const clearAll = () => {
-    if (lastTypedTextRef.current.trim()) {
-      void saveVoiceSession(lastTypedTextRef.current)
+    const fullText = typingSessionRef.current.getFullText()
+    if (fullText) {
+      void saveVoiceSession(fullText)
     }
     speech.clearTranscript()
     localVoice.clearTranscript()
     browserSpeech.clearTranscript()
-    lastTypedTextRef.current = ''
+    typingSessionRef.current.reset()
+    lastFinalTranscriptRef.current = ''
   }
 
   const [isCommandMode, setIsCommandMode] = useState<boolean>(() => {
@@ -82,11 +87,13 @@ export const FloatingWindowApp: React.FC = () => {
     localStorage.setItem('kvie_command_mode', String(isCommandMode))
   }, [isCommandMode])
 
-  // Auto-save voice session, execute commands, or erase buffer whenever recording stops
+  // Auto-save voice session, execute commands, or finalize buffer whenever recording stops
   useEffect(() => {
     if (!speech.isListening) {
-      if (lastTypedTextRef.current.trim()) {
-        const raw = lastTypedTextRef.current
+      const fullText = typingSessionRef.current.getFullText()
+      if (fullText) {
+        typingSessionRef.current.commitCurrent()
+        const raw = fullText
         void tauriBridge.getActiveAppContext().then(async ctx => {
           if (isCommandMode || isVoiceCommandIntent(raw)) {
             setInjectionMessage('Executing Voice Command (Qwen2.5)...')
@@ -113,54 +120,59 @@ export const FloatingWindowApp: React.FC = () => {
     }
   }, [speech.isListening, isCommandMode])
 
-  // Real-time live streaming typing + live auto-correction
+  // Smart Incremental Real-time live streaming typing + tail word overlap analysis
   useEffect(() => {
     if (!isUniversalMode || !speech.isListening) return
 
-    const activeText = speech.interimTranscript || speech.transcript || localVoice.latestSegment
-    const previous = lastTypedTextRef.current
+    const session = typingSessionRef.current
+    const currentFinal = speech.transcript || ''
+    const currentInterim = speech.interimTranscript || ''
+    const latestSeg = localVoice.latestSegment || ''
 
-    if (!activeText && previous) {
-      const raw = previous
-      void tauriBridge.getActiveAppContext().then(async ctx => {
-        const cleaned = await runQwenAutoEdit(raw, {
-          surroundingText: ctx.surrounding_text,
-          targetApp: ctx.app_name,
-        })
-        void saveVoiceSession(cleaned || raw, ctx.app_name)
-      })
-      lastTypedTextRef.current = ''
+    // Case 1: Final segment arrived (e.g. after a pause)
+    if (currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
+      // Find the new portion of finalized transcript
+      let newFinalPortion = currentFinal
+      if (currentFinal.startsWith(lastFinalTranscriptRef.current)) {
+        newFinalPortion = currentFinal.slice(lastFinalTranscriptRef.current.length).trim()
+      } else if (latestSeg) {
+        newFinalPortion = latestSeg
+      }
+
+      lastFinalTranscriptRef.current = currentFinal
+
+      if (newFinalPortion) {
+        const delta = session.processSegment(newFinalPortion, true)
+        if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+          void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
+            setInjectionMessage('Sentence typed & saved')
+          }).catch(err => {
+            setInjectionMessage(err instanceof Error ? err.message : String(err))
+          })
+        }
+      }
       return
     }
 
-    if (!activeText || activeText === previous) return
-
-    let commonPrefixLen = 0
-    const maxLen = Math.min(previous.length, activeText.length)
-    for (let i = 0; i < maxLen; i++) {
-      if (previous[i] === activeText[i]) commonPrefixLen++
-      else break
+    // Case 2: Active Interim speech clause while speaking
+    if (currentInterim) {
+      const delta = session.processSegment(currentInterim, false)
+      if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+        void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
+          setInjectionMessage('Typing...')
+        }).catch(err => {
+          setInjectionMessage(err instanceof Error ? err.message : String(err))
+        })
+      }
     }
-
-    const eraseCount = previous.length - commonPrefixLen
-    const appendText = activeText.slice(commonPrefixLen)
-
-    lastTypedTextRef.current = activeText
-
-    void tauriBridge.eraseAndInject(eraseCount, appendText).then(() => {
-      setInjectionMessage('Typing & Auto-Editing (Qwen2.5)...')
-    }).catch(err => {
-      setInjectionMessage(err instanceof Error ? err.message : String(err))
-    })
-
-    const timeout = window.setTimeout(() => setInjectionMessage(null), 2000)
-    return () => window.clearTimeout(timeout)
   }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode])
+
 
   const handleToggleListening = () => {
     if (speech.isListening) {
-      if (lastTypedTextRef.current.trim()) {
-        void saveVoiceSession(lastTypedTextRef.current)
+      const fullText = typingSessionRef.current.getFullText()
+      if (fullText) {
+        void saveVoiceSession(fullText)
       }
       speech.stopListening()
       clearAll()

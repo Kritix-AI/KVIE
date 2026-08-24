@@ -1,26 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { mergeRollingText } from '../lib/incrementalTypingEngine'
+
 interface VoiceEvent { kind: string; text?: string; language?: string; confidence?: number; error?: string; action?: string }
 
 const SERVICE_URL = import.meta.env.VITE_KVIE_STT_URL || 'ws://127.0.0.1:8765/ws/transcribe'
 const HEALTH_URL = SERVICE_URL.replace(/^ws/, 'http').replace(/\/ws\/transcribe$/, '/health')
 
-const mergeRollingText = (existing: string, incoming: string) => {
-  const left = existing.trim()
-  const right = incoming.trim()
-  if (!left) return right
-  if (!right) return left
-  const leftWords = left.split(/\s+/)
-  const rightWords = right.split(/\s+/)
-  let overlap = 0
-  const max = Math.min(leftWords.length, rightWords.length)
-  for (let size = 1; size <= max; size += 1) {
-    const a = leftWords.slice(-size).join(' ').toLowerCase()
-    const b = rightWords.slice(0, size).join(' ').toLowerCase()
-    if (a === b) overlap = size
-  }
-  return `${left} ${rightWords.slice(overlap).join(' ')}`.trim()
-}
 
 const downsample = (input: Float32Array, inputRate: number, outputRate: number) => {
   if (inputRate === outputRate) return input

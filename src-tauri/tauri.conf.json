@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Kritix — Voice workspace",
+        "title": "Kritix \u2014 Voice workspace",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
@@ -33,13 +33,18 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico", "icons/icon.svg", "icons/icon.png", "icons/icon.icns"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.svg",
+      "icons/icon.png",
+      "icons/icon.icns"
+    ],
     "macOS": {
       "infoPlist": "Info.plist"
     }

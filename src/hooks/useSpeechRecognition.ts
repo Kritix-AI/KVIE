@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { mergeRollingText } from '../lib/incrementalTypingEngine'
 
 interface SpeechRecognitionEventLike extends Event { results: SpeechRecognitionResultList; resultIndex: number }
 interface SpeechRecognitionErrorEventLike extends Event { error: string }
@@ -18,7 +19,7 @@ type SpeechRecognitionWindow = Window & { SpeechRecognition?: SpeechRecognitionC
 export const useSpeechRecognition = (language = 'en-IN') => {
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const restartRef = useRef(false)
-  const [state, setState] = useState({ isListening: false, isSupported: false, transcript: '', interimTranscript: '', error: null as string | null })
+  const [state, setState] = useState({ isListening: false, isSupported: false, transcript: '', interimTranscript: '', latestSegment: '', error: null as string | null })
 
   useEffect(() => {
     // Request microphone permission upfront in Chromium Webview
@@ -48,7 +49,17 @@ export const useSpeechRecognition = (language = 'en-IN') => {
         if (result.isFinal) finalText += `${result[0].transcript} `
         else interimText += `${result[0].transcript} `
       }
-      setState(current => ({ ...current, transcript: finalText ? `${current.transcript}${finalText}` : current.transcript, interimTranscript: interimText.trim(), error: null }))
+      setState(current => {
+        const seg = finalText.trim() || interimText.trim()
+        const newTranscript = finalText.trim() ? mergeRollingText(current.transcript, finalText.trim()) : current.transcript
+        return {
+          ...current,
+          transcript: newTranscript,
+          latestSegment: seg,
+          interimTranscript: interimText.trim(),
+          error: null,
+        }
+      })
     }
     recognition.onerror = event => {
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {

@@ -311,7 +311,7 @@ const App = () => {
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR')) {
+      if (e.ctrlKey && e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR')) {
         e.preventDefault()
         const currentEnabled = localStorage.getItem('kvie_global_hotkey_enabled') !== 'false'
         if (!currentEnabled) return
@@ -359,11 +359,15 @@ const App = () => {
     window.setTimeout(() => setInjectionMessage(null), 3000)
   }
 
-  const activeDocumentText = localVoice.isAvailable && localVoice.documentText ? localVoice.documentText : document.text
+  const activeDocumentText = (localVoice.isAvailable && localVoice.documentText)
+    ? localVoice.documentText
+    : (speech.transcript || document.text)
   const wordCount = useMemo(() => activeDocumentText.trim() ? activeDocumentText.trim().split(/\s+/).length : 0, [activeDocumentText])
 
   const clearAll = () => {
     speech.clearTranscript()
+    localVoice.clearTranscript()
+    browserSpeech.clearTranscript()
     lastCommittedRef.current = ''
     void document.apply({ action: 'clear' })
   }
@@ -598,6 +602,7 @@ const App = () => {
                   {activeDocumentText || speech.interimTranscript ? (
                     <>
                       {activeDocumentText}
+                      {activeDocumentText && speech.interimTranscript && !/[\s\n]$/.test(activeDocumentText) ? ' ' : ''}
                       <span style={{ color: theme.accentColor }} className="font-normal">{speech.interimTranscript}</span>
                     </>
                   ) : (
@@ -934,12 +939,8 @@ const App = () => {
 
                   <div className="py-4 flex items-center justify-between">
                     <div>
-                      <p className="font-medium text-zinc-200">
-                        Global System-Wide Shortcut ({typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/.test(navigator.userAgent || '') ? '⌘ + ⌥ + R' : 'Ctrl + Alt + R'})
-                      </p>
-                      <p className="text-xs text-zinc-500">
-                        Pressing {typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/.test(navigator.userAgent || '') ? '⌘ + ⌥ + R on macOS' : 'Ctrl + Alt + R on Windows'} turns mic ON or OFF instantly
-                      </p>
+                      <p className="font-medium text-zinc-200">Global System-Wide Shortcut (Ctrl + Alt + R)</p>
+                      <p className="text-xs text-zinc-500">Pressing Ctrl + Alt + R anywhere on Windows turns mic ON or OFF instantly</p>
                     </div>
                     <button
                       onClick={() => setIsGlobalHotkeyEnabled(prev => !prev)}
