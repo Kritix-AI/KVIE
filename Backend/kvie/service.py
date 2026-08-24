@@ -12,21 +12,149 @@ import json
 from dataclasses import asdict
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
 from Backend.voice.StreamingSTT import StreamingSTT, StreamingSTTConfig, TranscriptEvent
 from Backend.kvie.session import KVIESession
 from Backend.kvie.storage import KVIEStore
+from Backend.kvie.document_state import DocumentState
+from Backend.kvie.intent_engine import IntentEngine
+from Backend.kvie.llm_intent import KvieDecisionEngine, OllamaIntentClassifier
+from Backend.voice.OllamaClient import get_ollama_client
 
 
 app = FastAPI(title="KVIE Local Streaming Service", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+intent_engine = IntentEngine()
+decision_engine = KvieDecisionEngine(model_classifier=OllamaIntentClassifier())
 
 
 @app.get("/health")
 async def health():
     return JSONResponse({"ok": True, "service": "kvie-streaming-stt", "sample_rate": 16000})
+
+
+@app.post("/api/intent/classify")
+async def classify_intent(request: Request):
+    """Classifies user spoken intent and returns structured JSON decision."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    transcript = str(data.get("transcript") or "").strip()
+    doc_text = str(data.get("document") or "").strip()
+    doc = DocumentState(doc_text)
+
+    decision = decision_engine.decide(transcript, doc)
+    return JSONResponse({
+        "ok": True,
+        "action": decision.action,
+        "content": decision.content,
+        "confidence": decision.confidence,
+        "target_sentence": decision.target_sentence,
+        "language": decision.language,
+        "reason": decision.reason,
+        "requires_llm": decision.requires_llm,
+    })
+
+
+@app.post("/api/command/execute")
+async def execute_command(request: Request):
+    """Executes a voice command on given text context and returns structured JSON."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    command = str(data.get("command") or "").strip()
+    context = str(data.get("context") or "").strip()
+    app_name = str(data.get("app_name") or "Desktop App").strip()
+
+    if not command:
+        return JSONResponse({
+            "ok": True,
+            "is_command": False,
+            "intent": "empty",
+            "transformed_text": context,
+            "action": "none",
+        })
+
+    # Classify intent first
+    doc = DocumentState(context)
+    decision = intent_engine.classify(command, doc)
+
+    # Handle deterministic document actions
+    if decision.action == "clear":
+        return JSONResponse({
+            "ok": True,
+            "is_command": True,
+            "intent": "clear",
+            "action": "clear",
+            "transformed_text": "",
+        })
+    if decision.action == "undo":
+        return JSONResponse({
+            "ok": True,
+            "is_command": True,
+            "intent": "undo",
+            "action": "undo",
+            "transformed_text": "",
+        })
+
+    # Run local LLM to execute voice transformation
+    client = get_ollama_client()
+    system_prompt = f"""You are KVIE's Voice Command Engine.
+Your task is to execute the user's voice instruction on the target text.
+
+Target App: {app_name}
+Voice Instruction: "{command}"
+
+TARGET TEXT:
+"{context[:1000]}"
+
+RULES:
+1. Transform the target text strictly according to the voice instruction (e.g. make formal, summarize in bullet points, fix grammar, shorten, expand, rewrite).
+2. If TARGET TEXT is empty, compose a high-quality draft answering the voice instruction directly.
+3. If Roman Hinglish is used, preserve Hinglish style.
+4. Output ONLY the transformed text. Do NOT add meta commentary, explanations, or quotes."""
+
+    response, error = client.chat(
+        messages=[{"role": "user", "content": f"Execute instruction: {command}\n\nTarget text:\n{context}"}],
+        system=system_prompt,
+        temperature=0.2,
+        max_tokens=400,
+    )
+
+    if not error and response:
+        cleaned = response.strip().strip('"\'`')
+        return JSONResponse({
+            "ok": True,
+            "is_command": True,
+            "intent": decision.action,
+            "action": "replace_text",
+            "transformed_text": cleaned,
+        })
+
+    # Fallback if LLM offline
+    return JSONResponse({
+        "ok": True,
+        "is_command": True,
+        "intent": decision.action,
+        "action": "fallback",
+        "transformed_text": context or command,
+    })
 
 
 @app.websocket("/ws/transcribe")

@@ -113,29 +113,37 @@ export const FloatingWindowApp: React.FC = () => {
   useEffect(() => {
     if (!speech.isListening) {
       const fullText = typingSessionRef.current.getFullText()
-      if (fullText) {
+      const rawTranscript = speech.transcript || localVoice.latestSegment || fullText
+      const rawCmd = rawTranscript.trim()
+
+      if (rawCmd) {
         typingSessionRef.current.commitCurrent()
-        const raw = fullText
         void tauriBridge.getActiveAppContext().then(async ctx => {
-          if (isCommandMode || isVoiceCommandIntent(raw)) {
-            setInjectionMessage('Executing Voice Command (Qwen2.5)...')
-            const cmdResult = await executeVoiceCommand(raw, ctx.surrounding_text, ctx.app_name)
+          if (isCommandMode || isVoiceCommandIntent(rawCmd)) {
+            setInjectionMessage('Executing Voice Command (LLM)...')
+            const cmdResult = await executeVoiceCommand(rawCmd, ctx.surrounding_text, ctx.app_name)
             if (cmdResult.isSuccess) {
-              const eraseCount = ctx.surrounding_text.length > 0 ? ctx.surrounding_text.length : raw.length
+              if (cmdResult.action === 'clear') {
+                const eraseLen = ctx.surrounding_text.length > 0 ? ctx.surrounding_text.length : rawCmd.length
+                await tauriBridge.eraseAndInject(eraseLen, '')
+                setInjectionMessage('Cleared text')
+                return
+              }
+              const eraseCount = ctx.surrounding_text.length > 0 ? ctx.surrounding_text.length : 0
               await tauriBridge.eraseAndInject(eraseCount, cmdResult.transformedText)
-              void saveVoiceSession(`[Command: ${raw}] -> ${cmdResult.transformedText}`, ctx.app_name)
-              setInjectionMessage('Voice Command Applied!')
+              void saveVoiceSession(`[Command: ${rawCmd}] -> ${cmdResult.transformedText}`, ctx.app_name)
+              setInjectionMessage(`Applied: ${cmdResult.intent || 'Command'}`)
               return
             }
           }
 
-          const cleaned = await runQwenAutoEdit(raw, {
+          const cleaned = await runQwenAutoEdit(rawCmd, {
             surroundingText: ctx.surrounding_text,
             targetApp: ctx.app_name,
           })
-          void saveVoiceSession(cleaned || raw, ctx.app_name)
+          void saveVoiceSession(cleaned || rawCmd, ctx.app_name)
         }).catch(() => {
-          void saveVoiceSession(raw)
+          void saveVoiceSession(rawCmd)
         })
       }
       clearAll()
@@ -145,6 +153,15 @@ export const FloatingWindowApp: React.FC = () => {
   // Smart Incremental Real-time live streaming typing + Custom Dictionary + Snippets + Live Translation
   useEffect(() => {
     if (!isUniversalMode || !speech.isListening) return
+
+    // In Command Mode, display live command feedback without typing raw words to external apps
+    if (isCommandMode) {
+      const liveCmd = speech.interimTranscript || speech.transcript || localVoice.latestSegment
+      if (liveCmd) {
+        setInjectionMessage(`Command: "${liveCmd}"`)
+      }
+      return
+    }
 
     const session = typingSessionRef.current
     const currentFinal = speech.transcript || ''

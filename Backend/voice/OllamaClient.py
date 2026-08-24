@@ -68,33 +68,45 @@ class OllamaLocalClient:
         Returns:
             (response_text, error) tuple
         """
-        model = model or self.default_model
+        target_model = model or self.default_model
 
         # Build payload
-        payload: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "num_ctx": OLLAMA_CONTEXT_LENGTH,
-            },
-        }
-
-        if system:
-            # Prepend/override system message
-            payload["messages"] = [
-                {"role": "system", "content": system},
-                *[m for m in messages if m.get("role") != "system"],
-            ]
+        def _make_payload(m: str) -> Dict[str, Any]:
+            p: Dict[str, Any] = {
+                "model": m,
+                "messages": messages,
+                "stream": stream,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens,
+                    "num_ctx": OLLAMA_CONTEXT_LENGTH,
+                },
+            }
+            if system:
+                p["messages"] = [
+                    {"role": "system", "content": system},
+                    *[msg for msg in messages if msg.get("role") != "system"],
+                ]
+            return p
 
         try:
             resp = self.session.post(
                 f"{self.base_url}/chat",
-                json=payload,
+                json=_make_payload(target_model),
                 timeout=OLLAMA_TIMEOUT,
             )
+
+            # If model not found (404), try available models from /tags
+            if resp.status_code == 404 or (resp.status_code != 200 and "not found" in resp.text.lower()):
+                avail = self.list_models()
+                if avail and avail[0] != target_model:
+                    target_model = avail[0]
+                    self.default_model = target_model
+                    resp = self.session.post(
+                        f"{self.base_url}/chat",
+                        json=_make_payload(target_model),
+                        timeout=OLLAMA_TIMEOUT,
+                    )
 
             if resp.status_code != 200:
                 return None, f"Ollama HTTP {resp.status_code}: {resp.text[:200]}"

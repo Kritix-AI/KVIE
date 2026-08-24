@@ -37,20 +37,22 @@ class IntentEngine:
         lower = normalized.lower()
         last_sentence = len(document.sentences()) - 1 if document.sentences() else None
 
-        if lower in {"undo", "undo that", "go back"}:
+        if lower in {"undo", "undo that", "go back", "undo karo"}:
             return IntentDecision("undo", reason="explicit undo command")
-        if lower in {"redo", "redo that", "bring it back"}:
+        if lower in {"redo", "redo that", "bring it back", "redo karo"}:
             return IntentDecision("redo", reason="explicit redo command")
-        if lower in {"stop", "cancel", "never mind", "nevermind"}:
+        if lower in {"stop", "cancel", "never mind", "nevermind", "ruko"}:
             return IntentDecision("ignore", reason="explicit cancellation")
+        if lower in {"clear", "clear all", "clear text", "clear document", "delete all", "sab clear karo", "clear kardo", "sab delete karo"}:
+            return IntentDecision("clear", reason="explicit clear command")
 
         correction = self._correction.match(normalized)
         if correction and last_sentence is not None:
             return IntentDecision("replace_sentence", correction.group(1).rstrip("."), .98, last_sentence, reason="correction phrase")
 
-        if lower.startswith("delete the last sentence") and last_sentence is not None:
+        if lower.startswith(("delete the last sentence", "delete last sentence", "pichla sentence delete karo")) and last_sentence is not None:
             return IntentDecision("delete_sentence", target_sentence=last_sentence, reason="last sentence deletion")
-        if lower.startswith("delete this sentence") and last_sentence is not None:
+        if lower.startswith(("delete this sentence", "delete current sentence", "yeh sentence delete karo")) and last_sentence is not None:
             return IntentDecision("delete_sentence", target_sentence=last_sentence, reason="current sentence deletion")
 
         targeted_replace = self._semantic_replace.match(normalized)
@@ -70,10 +72,10 @@ class IntentEngine:
         if translation:
             return IntentDecision("translate", language=translation.group(1).strip().lower(), reason="explicit translation request")
 
-        if lower.startswith(("rewrite ", "rewrite this", "rephrase ", "change the tone")):
+        if lower.startswith(("rewrite", "rephrase", "paraphrase", "change tone", "make this", "make it", "summarize", "shorten", "expand", "fix grammar", "correct mistakes", "polish", "is text ko", "isko", "formal banao", "summary bana")):
             return IntentDecision("rewrite", content=normalized, confidence=.9, target_sentence=last_sentence, reason="rewrite instruction", requires_llm=True)
 
-        if lower.startswith(("format ", "make this a list", "turn this into")):
+        if lower.startswith(("format ", "make this a list", "turn this into", "bullet points")):
             return IntentDecision("format", content=normalized, confidence=.9, reason="formatting instruction", requires_llm=True)
 
         if not normalized:
@@ -83,6 +85,8 @@ class IntentEngine:
     def apply(self, decision: IntentDecision, document: DocumentState) -> DocumentSnapshot:
         if decision.action == "append":
             return document.append(decision.content, {"intent": decision.action, "confidence": decision.confidence})
+        if decision.action == "clear":
+            return document.clear({"intent": decision.action})
         if decision.action == "replace_sentence":
             if decision.target_sentence is None:
                 return document.snapshot()
