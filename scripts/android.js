@@ -7,20 +7,19 @@ const require = createRequire(import.meta.url)
 const isWindows = process.platform === 'win32'
 const env = { ...process.env }
 
-// 1. Setup JAVA_HOME
-if (!env.JAVA_HOME || !fs.existsSync(env.JAVA_HOME)) {
-  const javaCandidates = [
-    'E:\\Android\\jbr',
-    'C:\\Program Files\\Android\\Android Studio\\jbr',
-    'C:\\Program Files\\Java\\jdk-21',
-    'C:\\Program Files\\Java\\jdk-17',
-    path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Android Studio', 'jbr'),
-  ]
-  for (const p of javaCandidates) {
-    if (fs.existsSync(p)) {
-      env.JAVA_HOME = p
-      break
-    }
+// 1. Setup JAVA_HOME (Prioritize Java 21 / 17 LTS for Gradle compatibility)
+const javaCandidates = [
+  path.join(os.homedir(), '.jdks', 'jbr-21.0.11'),
+  'C:\\Program Files\\Java\\jdk-21',
+  'C:\\Program Files\\Java\\jdk-17',
+  'C:\\Program Files\\Android\\Android Studio\\jbr',
+  'E:\\Android\\jbr',
+  path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Android Studio', 'jbr'),
+]
+for (const p of javaCandidates) {
+  if (fs.existsSync(p)) {
+    env.JAVA_HOME = p
+    break
   }
 }
 
