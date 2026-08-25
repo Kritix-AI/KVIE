@@ -11,6 +11,10 @@
     "tauri:build": "tauri build",
     "tauri:build:win": "tauri build --bundles nsis,msi",
     "tauri:build:mac": "tauri build --bundles dmg,app",
+    "android:dev": "node scripts/android.js dev",
+    "android:build": "node scripts/android.js build --apk",
+    "android:init": "node scripts/android.js init",
+    "android:open": "node scripts/android.js open",
     "kvie:service": "python -m Backend.kvie.service",
     "preview": "vite preview",
     "start": "vite preview"
