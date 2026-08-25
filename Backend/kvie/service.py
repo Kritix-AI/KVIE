@@ -35,12 +35,30 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    return JSONResponse({
+        "service": "Kritix Voice Intelligence Engine (KVIE)",
+        "status": "online",
+        "version": "0.1.6",
+        "endpoints": {
+            "health": "/health",
+            "models": "/api/models",
+            "models_download": "/api/models/download?model_id=<id>",
+            "websocket_stt": "/ws/transcribe",
+            "swagger_docs": "/docs",
+        },
+        "message": "KVIE Backend Service is running successfully. Open the Kritix Desktop App or http://localhost:5173 for the graphical interface.",
+    })
+
+
 @app.get("/health")
 async def health():
     return JSONResponse({"ok": True, "service": "kvie-streaming-stt", "sample_rate": 16000})
 
 
 @app.get("/api/models")
+@app.get("/models")
 async def list_models():
     installed = ModelManager.get_installed_models()
     active = ModelManager.get_active_model_id()
@@ -52,12 +70,14 @@ class SelectModelRequest(BaseModel):
 
 
 @app.post("/api/models/select")
+@app.post("/models/select")
 async def select_model(req: SelectModelRequest):
     success = ModelManager.set_active_model_id(req.model_id)
     return JSONResponse({"ok": success, "active": req.model_id})
 
 
 @app.get("/api/models/download")
+@app.get("/models/download")
 async def download_model_sse(model_id: str):
     loop = asyncio.get_running_loop()
     progress_queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
