@@ -42,6 +42,7 @@ import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets 
 import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import { processSpokenVoiceText } from './lib/incrementalTypingEngine'
+import { fetchModelsStatus, selectActiveModel, downloadModelWithProgress } from './lib/modelsApi'
 
 const navItems = ['Workspace', 'Sessions', 'Models', 'Settings']
 
@@ -139,10 +140,27 @@ const App = () => {
 
   const [downloadedModels, setDownloadedModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('kvie_downloaded_stt_models')
-    return saved ? JSON.parse(saved) : ['large-v3-turbo', 'small']
+    return saved ? JSON.parse(saved) : ['large-v3-turbo']
   })
 
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({})
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { pct: number; downloadedMB: number; totalMB: number; status: string }>>({})
+
+  // Fetch real model installation status from Python backend on mount
+  useEffect(() => {
+    void (async () => {
+      const res = await fetchModelsStatus()
+      if (res) {
+        if (res.installed && res.installed.length > 0) {
+          setDownloadedModels(old => [...new Set([...old, ...res.installed])])
+          localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify([...new Set(res.installed)]))
+        }
+        if (res.active) {
+          setActiveModelId(res.active)
+          localStorage.setItem('kvie_active_stt_model', res.active)
+        }
+      }
+    })()
+  }, [])
 
   const [isUniversalMode, setIsUniversalMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('kvie_universal_mode')
@@ -415,25 +433,58 @@ const App = () => {
 
   const handleDownloadModel = (modelId: string) => {
     if (downloadProgress[modelId] !== undefined) return
-    setDownloadProgress(prev => ({ ...prev, [modelId]: 5 }))
 
-    const interval = setInterval(() => {
-      setDownloadProgress(prev => {
-        const current = prev[modelId] || 5
-        if (current >= 100) {
-          clearInterval(interval)
-          setDownloadedModels(old => [...new Set([...old, modelId])])
-          const updated = { ...prev }
-          delete updated[modelId]
+    setDownloadProgress(prev => ({
+      ...prev,
+      [modelId]: { pct: 1, downloadedMB: 0, totalMB: 0, status: 'Connecting to Hugging Face...' },
+    }))
+
+    downloadModelWithProgress(
+      modelId,
+      payload => {
+        const dMB = payload.downloaded_bytes ? Math.round(payload.downloaded_bytes / (1024 * 1024)) : 0
+        const tMB = payload.total_bytes ? Math.round(payload.total_bytes / (1024 * 1024)) : 0
+        setDownloadProgress(prev => ({
+          ...prev,
+          [modelId]: {
+            pct: payload.progress,
+            downloadedMB: dMB,
+            totalMB: tMB,
+            status: payload.status === 'connecting' ? 'Connecting...' : `Downloading ${payload.progress}%`,
+          },
+        }))
+      },
+      () => {
+        setDownloadedModels(old => {
+          const updated = [...new Set([...old, modelId])]
+          localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify(updated))
           return updated
-        }
-        return { ...prev, [modelId]: current + Math.floor(Math.random() * 18) + 10 }
-      })
-    }, 350)
+        })
+        setDownloadProgress(prev => {
+          const next = { ...prev }
+          delete next[modelId]
+          return next
+        })
+        setInjectionMessage(`Model ${modelId} installed successfully!`)
+      },
+      err => {
+        setInjectionMessage(`Download failed: ${err}`)
+        setDownloadProgress(prev => {
+          const next = { ...prev }
+          delete next[modelId]
+          return next
+        })
+      }
+    )
   }
 
-  const handleSelectModel = (modelId: string) => {
+  const handleSelectModel = async (modelId: string) => {
     setActiveModelId(modelId)
+    localStorage.setItem('kvie_active_stt_model', modelId)
+    const success = await selectActiveModel(modelId)
+    if (success) {
+      setInjectionMessage(`Switched active STT Engine to ${modelId}`)
+    }
   }
 
   const filteredSessions = useMemo(() => {
@@ -833,13 +884,17 @@ const App = () => {
                                 Use Model
                               </button>
                             ) : progress !== undefined ? (
-                              <div className="w-full rounded-xl bg-zinc-800 p-2 text-center text-xs">
-                                <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
-                                  <span>Downloading Model...</span>
-                                  <span>{progress}%</span>
+                              <div className="w-full rounded-xl bg-zinc-800 p-2.5 text-center text-xs">
+                                <div className="flex justify-between text-[11px] text-zinc-300 mb-1 font-mono">
+                                  <span>{progress.status}</span>
+                                  {progress.totalMB > 0 ? (
+                                    <span>{progress.downloadedMB} MB / {progress.totalMB} MB</span>
+                                  ) : (
+                                    <span>{progress.pct}%</span>
+                                  )}
                                 </div>
-                                <div className="h-1.5 w-full rounded-full bg-zinc-900 overflow-hidden">
-                                  <div className="h-full transition-all duration-300" style={{ width: `${progress}%`, backgroundColor: theme.accentColor }} />
+                                <div className="h-2 w-full rounded-full bg-zinc-900 overflow-hidden">
+                                  <div className="h-full transition-all duration-200" style={{ width: `${progress.pct}%`, backgroundColor: theme.accentColor }} />
                                 </div>
                               </div>
                             ) : (
