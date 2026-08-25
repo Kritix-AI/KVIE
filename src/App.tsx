@@ -484,13 +484,19 @@ const App = () => {
       payload => {
         const dMB = payload.downloaded_bytes ? Math.round(payload.downloaded_bytes / (1024 * 1024)) : 0
         const tMB = payload.total_bytes ? Math.round(payload.total_bytes / (1024 * 1024)) : 0
+        const statusText = payload.status === 'completed'
+          ? 'Completed'
+          : payload.status === 'connecting'
+          ? 'Connecting to Hugging Face...'
+          : `Downloading ${payload.progress}%`
+
         setDownloadProgress(prev => ({
           ...prev,
           [modelId]: {
             pct: payload.progress,
             downloadedMB: dMB,
             totalMB: tMB,
-            status: payload.status === 'connecting' ? 'Connecting...' : `Downloading ${payload.progress}%`,
+            status: statusText,
           },
         }))
       },

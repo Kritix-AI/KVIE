@@ -144,6 +144,34 @@ def download_model_stream(
         target_dir = os.path.join(cache_hub, f"models--{org_repo}", "snapshots", "main")
         os.makedirs(target_dir, exist_ok=True)
 
+        # Quick check if all files already exist with correct size
+        all_exist = True
+        for item in files:
+            dest_file = os.path.join(target_dir, item.path)
+            if not os.path.exists(dest_file) or os.path.getsize(dest_file) != item.size:
+                all_exist = False
+                break
+
+        if all_exist and len(files) > 0:
+            final_payload = {
+                "model_id": model_id,
+                "progress": 100.0,
+                "downloaded_bytes": total_repo_bytes,
+                "total_bytes": total_repo_bytes,
+                "status": "completed",
+            }
+            _current_downloads[model_id] = final_payload
+            progress_callback(final_payload)
+            return True
+
+        progress_callback({
+            "model_id": model_id,
+            "progress": 0.5,
+            "downloaded_bytes": 0,
+            "total_bytes": total_repo_bytes,
+            "status": f"Downloading 0.5% (0 MB / {total_repo_bytes / (1024*1024):.1f} MB)",
+        })
+
         downloaded_bytes = 0
         start_time = time.time()
         last_emit_time = start_time
