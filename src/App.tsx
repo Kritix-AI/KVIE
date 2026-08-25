@@ -185,22 +185,30 @@ const App = () => {
 
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { pct: number; downloadedMB: number; totalMB: number; status: string }>>({})
 
-  // Fetch real model installation status from Python backend on mount
-  useEffect(() => {
-    void (async () => {
-      const res = await fetchModelsStatus()
-      if (res) {
-        if (res.installed && res.installed.length > 0) {
-          setDownloadedModels(old => [...new Set([...old, ...res.installed])])
-          localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify([...new Set(res.installed)]))
-        }
-        if (res.active) {
-          setActiveModelId(res.active)
-          localStorage.setItem('kvie_active_stt_model', res.active)
-        }
+  // Fetch real model installation status from Python backend on mount & Models tab visit
+  const refreshInstalledModels = async () => {
+    const res = await fetchModelsStatus()
+    if (res) {
+      if (res.installed && res.installed.length > 0) {
+        setDownloadedModels(old => [...new Set([...old, ...res.installed])])
+        localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify([...new Set(res.installed)]))
       }
-    })()
+      if (res.active) {
+        setActiveModelId(res.active)
+        localStorage.setItem('kvie_active_stt_model', res.active)
+      }
+    }
+  }
+
+  useEffect(() => {
+    void refreshInstalledModels()
   }, [])
+
+  useEffect(() => {
+    if (activeNav === 'Models') {
+      void refreshInstalledModels()
+    }
+  }, [activeNav])
 
   const [isUniversalMode, setIsUniversalMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('kvie_universal_mode')
@@ -931,16 +939,25 @@ const App = () => {
                               </button>
                             ) : progress !== undefined ? (
                               <div className="w-full rounded-xl bg-zinc-800 p-2.5 text-center text-xs">
-                                <div className="flex justify-between text-[11px] text-zinc-300 mb-1 font-mono">
-                                  <span>{progress.status}</span>
-                                  {progress.totalMB > 0 ? (
-                                    <span>{progress.downloadedMB} MB / {progress.totalMB} MB</span>
-                                  ) : (
-                                    <span>{progress.pct}%</span>
-                                  )}
+                                <div className="flex justify-between items-center text-[11px] text-zinc-300 mb-1 font-mono">
+                                  <span className="truncate pr-1">{progress.status}</span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {progress.totalMB > 0 ? (
+                                      <span>{progress.downloadedMB} MB / {progress.totalMB} MB</span>
+                                    ) : (
+                                      <span>{progress.pct}%</span>
+                                    )}
+                                    <button
+                                      onClick={() => setDownloadProgress(prev => { const n = { ...prev }; delete n[model.id]; return n })}
+                                      className="text-zinc-500 hover:text-zinc-200 ml-1 text-xs px-1 hover:bg-zinc-700 rounded transition"
+                                      title="Cancel / Reset"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="h-2 w-full rounded-full bg-zinc-900 overflow-hidden">
-                                  <div className="h-full transition-all duration-200" style={{ width: `${progress.pct}%`, backgroundColor: theme.accentColor }} />
+                                  <div className="h-full transition-all duration-200" style={{ width: `${Math.max(progress.pct, 3)}%`, backgroundColor: theme.accentColor }} />
                                 </div>
                               </div>
                             ) : (
