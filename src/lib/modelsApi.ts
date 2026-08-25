@@ -2,6 +2,9 @@
  * KVIE Real Model Management & Download Client
  */
 
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+
 export interface ModelProgressPayload {
   model_id: string
   progress: number // 0 to 100
@@ -25,7 +28,7 @@ export async function fetchModelsStatus(): Promise<ModelsStatusResponse | null> 
       return await res.json()
     }
   } catch {
-    // Service might be offline or using local fallback
+    // Service might still be booting up
   }
   return null
 }
@@ -53,30 +56,70 @@ export function downloadModelWithProgress(
   onComplete: () => void,
   onError: (err: string) => void
 ): () => void {
-  const eventSource = new EventSource(`${SERVICE_BASE_URL}/api/models/download?model_id=${encodeURIComponent(modelId)}`)
+  let isCancelled = false
+  let unlistenFn: (() => void) | null = null
 
-  eventSource.onmessage = event => {
-    try {
-      const data: ModelProgressPayload = JSON.parse(event.data)
-      onProgress(data)
-      if (data.status === 'completed') {
-        eventSource.close()
-        onComplete()
-      } else if (data.status === 'error') {
-        eventSource.close()
-        onError(data.error || 'Failed to download model weights')
+  // 1. Try Native Tauri Invoke Method
+  try {
+    void listen<string>('model-download-progress', event => {
+      if (isCancelled) return
+      try {
+        const payload: ModelProgressPayload = JSON.parse(event.payload)
+        if (payload.model_id === modelId) {
+          onProgress(payload)
+          if (payload.status === 'completed') {
+            onComplete()
+          } else if (payload.status === 'error') {
+            onError(payload.error || 'Failed to download model weights')
+          }
+        }
+      } catch {
+        // parsing
       }
-    } catch {
-      // Parse error
-    }
+    }).then(fn => {
+      unlistenFn = fn
+    })
+
+    void invoke('download_model_native', { modelId }).catch(() => {
+      // If native invoke fails, try SSE fallback below
+    })
+  } catch {
+    // Webview fallback
   }
 
-  eventSource.onerror = () => {
-    eventSource.close()
-    onError('Connection to model download stream lost')
+  // 2. HTTP Server-Sent Events (SSE) Fallback
+  let eventSource: EventSource | null = null
+  try {
+    eventSource = new EventSource(`${SERVICE_BASE_URL}/api/models/download?model_id=${encodeURIComponent(modelId)}`)
+
+    eventSource.onmessage = event => {
+      if (isCancelled) return
+      try {
+        const data: ModelProgressPayload = JSON.parse(event.data)
+        onProgress(data)
+        if (data.status === 'completed') {
+          eventSource?.close()
+          onComplete()
+        } else if (data.status === 'error') {
+          eventSource?.close()
+          onError(data.error || 'Failed to download model weights')
+        }
+      } catch {
+        // Parse error
+      }
+    }
+
+    eventSource.onerror = () => {
+      eventSource?.close()
+      // Only trigger error if not handled by native invoke
+    }
+  } catch {
+    // Fallback
   }
 
   return () => {
-    eventSource.close()
+    isCancelled = true
+    if (unlistenFn) unlistenFn()
+    if (eventSource) eventSource.close()
   }
 }

@@ -578,9 +578,76 @@ fn setup_system_tray(app: &mut tauri::App) -> Result<(), String> {
     Ok(())
 }
 
+fn start_python_service() {
+    std::thread::spawn(|| {
+        if let Ok(stream) = std::net::TcpStream::connect("127.0.0.1:8765") {
+            drop(stream);
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            let mut cmd = std::process::Command::new("python");
+            cmd.args(&["-m", "Backend.kvie.service"]);
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            let _ = cmd.spawn();
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut cmd = std::process::Command::new("python3");
+            cmd.args(&["-m", "Backend.kvie.service"]);
+            let _ = cmd.spawn();
+        }
+    });
+}
+
+#[tauri::command]
+fn download_model_native(app_handle: tauri::AppHandle, model_id: String) -> Result<(), String> {
+    std::thread::spawn(move || {
+        let script = format!(
+            r#"import json, sys
+from Backend.voice import ModelManager
+
+def on_progress(p):
+    print("PROGRESS_JSON:" + json.dumps(p), flush=True)
+
+ModelManager.download_model_stream("{}", on_progress)
+"#,
+            model_id
+        );
+
+        #[cfg(target_os = "windows")]
+        use std::os::windows::process::CommandExt;
+
+        let mut cmd = std::process::Command::new("python");
+        cmd.args(&["-c", &script]);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+
+        if let Ok(mut child) = cmd.spawn() {
+            if let Some(stdout) = child.stdout.take() {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(stdout);
+                for line in reader.lines().filter_map(|l| l.ok()) {
+                    if let Some(json_str) = line.strip_prefix("PROGRESS_JSON:") {
+                        let _ = app_handle.emit("model-download-progress", json_str.to_string());
+                    }
+                }
+            }
+            let _ = child.wait();
+        }
+    });
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     start_active_app_tracker();
+    start_python_service();
 
     tauri::Builder::default()
         .setup(|app| {
@@ -607,7 +674,8 @@ pub fn run() {
             close_floating_mic,
             toggle_floating_mic,
             get_active_app_info,
-            get_active_app_context
+            get_active_app_context,
+            download_model_native
         ])
         .build(tauri::generate_context!())
         .expect("error while building Kritix")
