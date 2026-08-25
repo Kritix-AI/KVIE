@@ -16,16 +16,24 @@ open class BuildTask : DefaultTask() {
 
     @TaskAction
     fun assemble() {
-        val executable = """npm""";
+        val baseExecutable = "npm"
+        val executable = if (Os.isFamily(Os.FAMILY_WINDOWS)) "$baseExecutable.cmd" else baseExecutable
+        
         try {
             runTauriCli(executable)
         } catch (e: Exception) {
+            // If the process started but failed with a non-zero exit code, don't try fallbacks.
+            // The error is likely in the Tauri CLI execution itself.
+            if (isExecFailure(e)) {
+                throw e
+            }
+
             if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-                // Try different Windows-specific extensions
+                // Try different Windows-specific extensions if the first one wasn't found
                 val fallbacks = listOf(
-                    "$executable.exe",
-                    "$executable.cmd",
-                    "$executable.bat",
+                    baseExecutable,
+                    "$baseExecutable.exe",
+                    "$baseExecutable.bat",
                 )
                 
                 var lastException: Exception = e
@@ -34,6 +42,9 @@ open class BuildTask : DefaultTask() {
                         runTauriCli(fallback)
                         return
                     } catch (fallbackException: Exception) {
+                        if (isExecFailure(fallbackException)) {
+                            throw fallbackException
+                        }
                         lastException = fallbackException
                     }
                 }
@@ -44,25 +55,39 @@ open class BuildTask : DefaultTask() {
         }
     }
 
+    private fun isExecFailure(e: Exception): Boolean {
+        val message = e.message ?: ""
+        return message.contains("finished with non-zero exit value") || 
+               e.javaClass.name.contains("ExecException")
+    }
+
     fun runTauriCli(executable: String) {
         val rootDirRel = rootDirRel ?: throw GradleException("rootDirRel cannot be null")
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
-        val args = listOf("run", "--", "tauri", "android", "android-studio-script");
+        
+        // Use 'android-studio-script' for IDE integration. 
+        // Note: For debug builds, Tauri CLI may expect a running dev server.
+        val args = mutableListOf("run", "tauri", "--", "android", "android-studio-script")
 
         project.exec {
             workingDir(File(project.projectDir, rootDirRel))
             executable(executable)
-            args(args)
+            
             if (project.logger.isEnabled(LogLevel.DEBUG)) {
-                args("-vv")
+                args.add("-vv")
             } else if (project.logger.isEnabled(LogLevel.INFO)) {
-                args("-v")
+                args.add("-v")
             }
+            
             if (release) {
-                args("--release")
+                args.add("--release")
             }
-            args(listOf("--target", target))
+            
+            args.add("--target")
+            args.add(target)
+            
+            args(args)
         }.assertNormalExitValue()
     }
 }

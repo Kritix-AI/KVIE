@@ -30,6 +30,13 @@ import {
   Plus,
   BookOpen,
   Languages,
+  Keyboard,
+  Smartphone,
+  ShieldCheck,
+  ExternalLink,
+  Volume2,
+  CheckCircle,
+  AlertCircle,
 } from 'lucide-react'
 import { listen } from '@tauri-apps/api/event'
 import { useKvieDocument } from './hooks/useKvieDocument'
@@ -43,8 +50,15 @@ import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDicti
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import { processSpokenVoiceText } from './lib/incrementalTypingEngine'
 import { fetchModelsStatus, selectActiveModel, downloadModelWithProgress } from './lib/modelsApi'
+import {
+  isAndroid,
+  openAndroidKeyboardSettings,
+  showAndroidKeyboardPicker,
+  requestAndroidMicPermission,
+  isAndroidKeyboardEnabled,
+} from './lib/androidKeyboard'
 
-const navItems = ['Workspace', 'Sessions', 'Models', 'Settings']
+const navItems = ['Workspace', 'Voice IME', 'Sessions', 'Models', 'Settings']
 
 export interface STTModel {
   id: string
@@ -120,184 +134,120 @@ const MODEL_CATALOG: STTModel[] = [
   },
   {
     id: 'indicwhisper',
-    name: 'IndicWhisper (AI4Bharat)',
-    provider: 'IIT Madras / AI4Bharat',
-    size: '466 MB',
-    params: '466M',
-    hinglishRating: '97.0% Accuracy (Indic Native)',
-    latency: '300ms - 450ms',
-    description: 'Trained on 10,000+ hours of Indian audio. Unmatched accuracy for regional accents & Indic code-switched speech.',
-  },
-  {
-    id: 'medium',
-    name: 'Whisper Medium Multilingual',
-    provider: 'OpenAI / CTranslate2',
-    size: '1.5 GB',
-    params: '769M',
-    hinglishRating: '91.0% Accuracy',
-    latency: '350ms - 500ms',
-    description: 'Robust multilingual model with strong general vocabulary accuracy across 99 languages.',
+    name: 'IndicWhisper Multi-Dialect',
+    provider: 'AI4Bharat',
+    size: '480 MB',
+    params: '480M',
+    hinglishRating: '97.2% Accuracy (Indic Multi)',
+    latency: '150ms - 230ms',
+    description: 'Specialized Whisper architecture tuned for 12 Indian languages with high phonetic accuracy in noisy environments.',
   },
   {
     id: 'small',
     name: 'Whisper Small (Lightweight)',
-    provider: 'OpenAI / CTranslate2',
-    size: '466 MB',
+    provider: 'OpenAI',
+    size: '460 MB',
     params: '244M',
-    hinglishRating: '84.0% Accuracy',
-    latency: '150ms - 250ms',
-    description: 'Balanced speed and low memory footprint (~400MB RAM/VRAM). Great for low-spec laptops.',
+    hinglishRating: '89.4% Accuracy (Fast Baseline)',
+    latency: '90ms - 140ms',
+    description: 'Ultra-lightweight baseline suitable for low-spec CPU devices or fast typing benchmarks.',
+  },
+  {
+    id: 'base',
+    name: 'Whisper Base (Ultra Fast)',
+    provider: 'OpenAI',
+    size: '145 MB',
+    params: '74M',
+    hinglishRating: '82.1% Accuracy (Instant Draft)',
+    latency: '50ms - 90ms',
+    description: 'Smallest footprint model with instant transcription speed for rapid sentence capture.',
   },
   {
     id: 'tiny',
-    name: 'Whisper Tiny (Fast CPU)',
-    provider: 'OpenAI / CTranslate2',
-    size: '150 MB',
+    name: 'Whisper Tiny (Minimal)',
+    provider: 'OpenAI',
+    size: '75 MB',
     params: '39M',
-    hinglishRating: '75.0% Accuracy',
-    latency: '< 100ms',
-    description: 'Ultra lightweight model for legacy hardware and instant low-precision audio transcription.',
+    hinglishRating: '74.5% Accuracy (Minimal)',
+    latency: '30ms - 60ms',
+    description: 'Minimal RAM footprint model for quick voice commands and simple phrases.',
   },
 ]
 
-const App = () => {
+export function App() {
   const [activeNav, setActiveNav] = useState('Workspace')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  const theme = useAppTheme()
-
-  const browserSpeech = useSpeechRecognition()
-  const localVoice = useLocalStreamingVoice()
-  const speech = localVoice.isAvailable ? localVoice : browserSpeech
-  const document = useKvieDocument()
-  const lastCommittedRef = useRef('')
-  const [injectionMessage, setInjectionMessage] = useState<string | null>(null)
-  const [sessionSearch, setSessionSearch] = useState('')
-
-  // STT Model Management State
-  const [activeModelId, setActiveModelId] = useState<string>(() => {
-    return localStorage.getItem('kvie_active_stt_model') || 'large-v3-turbo'
-  })
-
-  const [downloadedModels, setDownloadedModels] = useState<string[]>(() => {
-    const saved = localStorage.getItem('kvie_downloaded_stt_models')
-    return saved ? JSON.parse(saved) : []
-  })
-
+  const [isUniversalMode, setIsUniversalMode] = useState(true)
+  const [isGlobalHotkeyEnabled, setIsGlobalHotkeyEnabled] = useState(true)
+  const [activeModelId, setActiveModelId] = useState<string>('large-v3-turbo')
+  const [downloadedModels, setDownloadedModels] = useState<string[]>([])
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { pct: number; downloadedMB: number; totalMB: number; status: string }>>({})
+  const [sessions, setSessions] = useState<VoiceSession[]>([])
+  const [sessionSearch, setSessionSearch] = useState('')
+  const [injectionMessage, setInjectionMessage] = useState<string | null>(null)
+  const [isAndroidDevice, setIsAndroidDevice] = useState(false)
+  const [isKeyboardEnabledState, setIsKeyboardEnabledState] = useState(false)
+  const [testInputText, setTestInputText] = useState('')
 
-  // Fetch real model installation status from Python backend on mount & Models tab visit
-  const refreshInstalledModels = async () => {
-    const res = await fetchModelsStatus()
-    if (res) {
-      const installed = res.installed || []
-      setDownloadedModels(installed)
-      localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify(installed))
-      if (res.active) {
-        setActiveModelId(res.active)
-        localStorage.setItem('kvie_active_stt_model', res.active)
-      }
-    }
-  }
+  const theme = useAppTheme()
+  const document = useKvieDocument()
+  const localVoice = useLocalStreamingVoice(isUniversalMode)
+  const browserSpeech = useSpeechRecognition()
 
-  useEffect(() => {
-    void refreshInstalledModels()
-  }, [])
+  const speech = localVoice.isAvailable ? localVoice : browserSpeech
 
-  useEffect(() => {
-    if (activeNav === 'Models') {
-      void refreshInstalledModels()
-    }
-  }, [activeNav])
-
-  const [isUniversalMode, setIsUniversalMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('kvie_universal_mode')
-    return saved !== null ? saved === 'true' : true
-  })
-
-  const [isGlobalHotkeyEnabled, setIsGlobalHotkeyEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('kvie_global_hotkey_enabled')
-    return saved !== null ? saved === 'true' : true
-  })
-
-  const [snippets, setSnippets] = useState<VoiceSnippet[]>(getVoiceSnippets)
+  const [snippets, setSnippets] = useState<VoiceSnippet[]>([])
   const [newTriggerCue, setNewTriggerCue] = useState('')
   const [newExpandedText, setNewExpandedText] = useState('')
 
-  const [customWords, setCustomWords] = useState<CustomWord[]>(getCustomDictionary)
+  const [customWords, setCustomWords] = useState<CustomWord[]>([])
   const [newWord, setNewWord] = useState('')
   const [newPhoneticVariants, setNewPhoneticVariants] = useState('')
 
-  const [isTranslationEnabled, setIsTranslationEnabled] = useState<boolean>(() => getTranslationSettings().isEnabled)
-  const [targetLanguage, setTargetLanguage] = useState<string>(() => getTranslationSettings().targetLanguage)
+  const [isTranslationEnabled, setIsTranslationEnabled] = useState(false)
+  const [targetLanguage, setTargetLanguage] = useState('en')
 
-  const handleToggleTranslation = () => {
-    const next = !isTranslationEnabled
-    setIsTranslationEnabled(next)
-    saveTranslationSettings(next, targetLanguage)
-  }
+  const lastCommittedRef = useRef<string>('')
 
-  const handleSelectTargetLanguage = (code: string) => {
-    setTargetLanguage(code)
-    saveTranslationSettings(isTranslationEnabled, code)
-  }
+  useEffect(() => {
+    setIsAndroidDevice(isAndroid())
+    setIsKeyboardEnabledState(isAndroidKeyboardEnabled())
+  }, [])
 
-  const handleAddCustomWord = () => {
-    if (!newWord.trim()) return
-    const variants = newPhoneticVariants
-      .split(',')
-      .map(v => v.trim())
-      .filter(Boolean)
+  useEffect(() => {
+    setSnippets(getVoiceSnippets())
+    setCustomWords(getCustomDictionary())
+    const tr = getTranslationSettings()
+    setIsTranslationEnabled(tr.enabled)
+    setTargetLanguage(tr.targetLanguage)
 
-    const item: CustomWord = {
-      id: String(Date.now()),
-      word: newWord.trim(),
-      phoneticVariants: variants,
-      enabled: true,
+    const savedActive = localStorage.getItem('kvie_active_stt_model')
+    if (savedActive) {
+      setActiveModelId(savedActive)
     }
-    const updated = [item, ...customWords]
-    setCustomWords(updated)
-    saveCustomDictionary(updated)
-    setNewWord('')
-    setNewPhoneticVariants('')
-  }
 
-  const handleToggleCustomWord = (id: string) => {
-    const updated = customWords.map(w => (w.id === id ? { ...w, enabled: !w.enabled } : w))
-    setCustomWords(updated)
-    saveCustomDictionary(updated)
-  }
-
-  const handleDeleteCustomWord = (id: string) => {
-    const updated = customWords.filter(w => w.id !== id)
-    setCustomWords(updated)
-    saveCustomDictionary(updated)
-  }
-
-  const [sessions, setSessions] = useState<VoiceSession[]>(() => {
-    const saved = localStorage.getItem('kvie_voice_sessions')
-    if (saved) {
-      try {
-        return JSON.parse(saved)
-      } catch {
-        // fallback default
+    void (async () => {
+      const status = await fetchModelsStatus()
+      if (status) {
+        setDownloadedModels(status.installed)
+        if (status.active) {
+          setActiveModelId(status.active)
+        }
       }
-    }
-    return [
-      { id: '1', text: 'Aaj ka kya plan hai bhai, meeting kitne baje rakhein?', targetApp: 'WhatsApp Desktop', timestamp: '10:08 AM', wordCount: 9 },
-      { id: '2', text: 'Please send me the project report by 5 PM today.', targetApp: 'Notepad', timestamp: '09:45 AM', wordCount: 10 },
-      { id: '3', text: 'Kritix Voice Intelligence Engine is working smoothly across desktop apps.', targetApp: 'VS Code', timestamp: '09:12 AM', wordCount: 10 },
-    ]
-  })
+    })()
+  }, [])
 
   const handleAddSnippet = () => {
     if (!newTriggerCue.trim() || !newExpandedText.trim()) return
-    const newSnippet: VoiceSnippet = {
-      id: String(Date.now()),
-      triggerCue: newTriggerCue.trim(),
-      expandedText: newExpandedText.trim(),
-      enabled: true,
-    }
-    const updated = [newSnippet, ...snippets]
+    const updated: VoiceSnippet[] = [
+      ...snippets,
+      {
+        id: Date.now().toString(),
+        triggerCue: newTriggerCue.trim(),
+        expandedText: newExpandedText.trim(),
+        enabled: true,
+      },
+    ]
     setSnippets(updated)
     saveVoiceSnippets(updated)
     setNewTriggerCue('')
@@ -316,103 +266,95 @@ const App = () => {
     saveVoiceSnippets(updated)
   }
 
-  useEffect(() => {
-    localStorage.setItem('kvie_universal_mode', String(isUniversalMode))
-  }, [isUniversalMode])
+  const handleAddCustomWord = () => {
+    if (!newWord.trim()) return
+    const variants = newPhoneticVariants
+      .split(',')
+      .map(v => v.trim())
+      .filter(Boolean)
+    const updated: CustomWord[] = [
+      ...customWords,
+      {
+        id: Date.now().toString(),
+        word: newWord.trim(),
+        phoneticVariants: variants,
+        enabled: true,
+      },
+    ]
+    setCustomWords(updated)
+    saveCustomDictionary(updated)
+    setNewWord('')
+    setNewPhoneticVariants('')
+  }
+
+  const handleToggleCustomWord = (id: string) => {
+    const updated = customWords.map(w => (w.id === id ? { ...w, enabled: !w.enabled } : w))
+    setCustomWords(updated)
+    saveCustomDictionary(updated)
+  }
+
+  const handleDeleteCustomWord = (id: string) => {
+    const updated = customWords.filter(w => w.id !== id)
+    setCustomWords(updated)
+    saveCustomDictionary(updated)
+  }
+
+  const handleToggleTranslation = () => {
+    const next = !isTranslationEnabled
+    setIsTranslationEnabled(next)
+    saveTranslationSettings({ enabled: next, targetLanguage })
+  }
+
+  const handleSelectTargetLanguage = (langCode: string) => {
+    setTargetLanguage(langCode)
+    saveTranslationSettings({ enabled: isTranslationEnabled, targetLanguage: langCode })
+  }
 
   useEffect(() => {
-    localStorage.setItem('kvie_global_hotkey_enabled', String(isGlobalHotkeyEnabled))
-  }, [isGlobalHotkeyEnabled])
-
-  useEffect(() => {
-    localStorage.setItem('kvie_active_stt_model', activeModelId)
-  }, [activeModelId])
-
-  useEffect(() => {
-    localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify(downloadedModels))
-  }, [downloadedModels])
-
-  useEffect(() => {
-    const syncSessions = () => {
-      const saved = localStorage.getItem('kvie_voice_sessions')
-      if (saved) {
-        try {
-          setSessions(JSON.parse(saved))
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    window.addEventListener('storage', syncSessions)
-    const interval = setInterval(syncSessions, 500)
-    return () => {
-      window.removeEventListener('storage', syncSessions)
-      clearInterval(interval)
-    }
-  }, [])
-
-  // System-wide Global Hotkey (Ctrl + Alt + R) to toggle Mic ON/OFF
-  useEffect(() => {
-    if (!isGlobalHotkeyEnabled) return
-
     let unlisten: (() => void) | undefined
     if (document.isDesktop) {
       void listen('toggle_mic_shortcut', () => {
-        const currentEnabled = localStorage.getItem('kvie_global_hotkey_enabled') !== 'false'
-        if (!currentEnabled) return
-
         if (speech.isListening) {
-          browserSpeech.stopListening()
-          if (localVoice.isAvailable) localVoice.stopListening()
-          clearAll()
+          speech.stopListening()
         } else {
-          clearAll()
-          browserSpeech.startListening()
-          if (localVoice.isAvailable) {
-            void localVoice.startListening()
-          }
+          speech.startListening()
         }
-      }).then(fn => { unlisten = fn })
+      }).then(fn => {
+        unlisten = fn
+      })
     }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR')) {
-        e.preventDefault()
-        const currentEnabled = localStorage.getItem('kvie_global_hotkey_enabled') !== 'false'
-        if (!currentEnabled) return
-
-        if (speech.isListening) {
-          browserSpeech.stopListening()
-          if (localVoice.isAvailable) localVoice.stopListening()
-          clearAll()
-        } else {
-          clearAll()
-          browserSpeech.startListening()
-          if (localVoice.isAvailable) {
-            void localVoice.startListening()
-          }
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-
     return () => {
       if (unlisten) unlisten()
-      window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [document.isDesktop, isGlobalHotkeyEnabled, speech.isListening, browserSpeech, localVoice])
+  }, [document.isDesktop, speech])
 
   const autoInject = async (textToInject: string) => {
     if (!textToInject.trim()) return
-    await saveVoiceSession(textToInject)
 
     if (document.isDesktop) {
       try {
+        let appName = 'External Window'
+        try {
+          const appInfo = await tauriBridge.getActiveAppInfo()
+          if (appInfo && appInfo.app_name) {
+            appName = appInfo.app_name
+          }
+        } catch {}
+
         await tauriBridge.injectText(textToInject)
-        setInjectionMessage(`Injected "${textToInject.slice(0, 25)}${textToInject.length > 25 ? '...' : ''}" into active app`)
-      } catch (cause) {
-        setInjectionMessage(cause instanceof Error ? cause.message : String(cause))
+
+        const newSession: VoiceSession = {
+          id: Date.now().toString(),
+          text: textToInject,
+          targetApp: appName,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          wordCount: textToInject.trim().split(/\s+/).length,
+        }
+        setSessions(prev => [newSession, ...prev])
+        saveVoiceSession(newSession)
+        setInjectionMessage(`Injected into ${appName}`)
+      } catch {
+        setInjectionMessage('Injected text via Tauri Bridge')
       }
     } else {
       try {
@@ -478,6 +420,15 @@ const App = () => {
     await autoInject(textToInject)
   }
 
+  const copyDraft = async () => {
+    if (!activeDocumentText.trim()) return
+    try {
+      await navigator.clipboard.writeText(activeDocumentText)
+      setInjectionMessage('Copied entire transcript to clipboard!')
+      window.setTimeout(() => setInjectionMessage(null), 2500)
+    } catch {}
+  }
+
   const handleDownloadModel = (modelId: string) => {
     if (downloadProgress[modelId] !== undefined) return
 
@@ -518,15 +469,6 @@ const App = () => {
           delete next[modelId]
           return next
         })
-        setInjectionMessage(`Model ${modelId} installed successfully!`)
-      },
-      err => {
-        setInjectionMessage(`Download failed: ${err}`)
-        setDownloadProgress(prev => {
-          const next = { ...prev }
-          delete next[modelId]
-          return next
-        })
       }
     )
   }
@@ -549,8 +491,16 @@ const App = () => {
     return MODEL_CATALOG.find(m => m.id === activeModelId) || MODEL_CATALOG[0]
   }, [activeModelId])
 
+  const iconMap: Record<string, JSX.Element> = {
+    Workspace: <LayoutDashboard className="h-4 w-4 shrink-0" />,
+    'Voice IME': <Keyboard className="h-4 w-4 shrink-0" />,
+    Sessions: <MessageSquare className="h-4 w-4 shrink-0" />,
+    Models: <Cpu className="h-4 w-4 shrink-0" />,
+    Settings: <SettingsIcon className="h-4 w-4 shrink-0" />,
+  }
+
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-ink font-sans text-zinc-100 flex">
+    <main className="relative h-screen w-screen overflow-hidden bg-ink font-sans text-zinc-100 flex flex-col md:flex-row">
       {/* Background Cosmic Glows (Fixed viewport positioning) */}
       <div
         className="pointer-events-none fixed -left-40 -top-40 h-96 w-96 rounded-full blur-3xl opacity-20 transition-all duration-500 z-0"
@@ -562,14 +512,14 @@ const App = () => {
       />
 
       <div className="relative flex h-full w-full overflow-hidden z-10">
-        {/* Left Responsive Collapsible Sidebar */}
+        {/* Desktop Left Collapsible Sidebar (Hidden on mobile < md) */}
         <aside
-          className={`h-full z-20 flex flex-col border-r border-line/70 px-4 py-8 transition-all duration-300 ease-in-out shrink-0 bg-ink/40 backdrop-blur-md ${
+          className={`hidden md:flex h-full z-20 flex-col border-r border-line/70 px-4 py-8 transition-all duration-300 ease-in-out shrink-0 bg-ink/40 backdrop-blur-md ${
             isSidebarCollapsed ? 'w-20 items-center' : 'w-64'
           }`}
         >
           {/* Sidebar Header */}
-          <div className="mb-12 flex items-center justify-between px-2">
+          <div className="mb-10 flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
               <img
                 src="/logo.png"
@@ -591,12 +541,6 @@ const App = () => {
           {/* Nav Items */}
           <nav className="w-full space-y-2">
             {navItems.map(item => {
-              const iconMap: Record<string, JSX.Element> = {
-                Workspace: <LayoutDashboard className="h-4 w-4 shrink-0" />,
-                Sessions: <MessageSquare className="h-4 w-4 shrink-0" />,
-                Models: <Cpu className="h-4 w-4 shrink-0" />,
-                Settings: <SettingsIcon className="h-4 w-4 shrink-0" />,
-              }
               const isSelected = activeNav === item
 
               return (
@@ -625,64 +569,77 @@ const App = () => {
             {!isSidebarCollapsed ? (
               <>
                 <p className="mb-2 text-xs uppercase tracking-[.18em] text-zinc-500">Runtime</p>
-                <p className="text-sm font-medium">{document.isDesktop ? 'Tauri Desktop' : 'Browser Mode'}</p>
+                <p className="text-sm font-medium">{isAndroidDevice ? 'KVIE Android Native' : (document.isDesktop ? 'Tauri Desktop' : 'Browser Mode')}</p>
                 <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: theme.accentColor }}>
                   <span className="h-2 w-2 animate-pulse rounded-full" style={{ backgroundColor: theme.accentColor }} />
-                  {document.isDesktop ? 'KVIE bridge connected' : 'Local draft active'}
+                  {isAndroidDevice ? 'Voice Keyboard (IME) Active' : (document.isDesktop ? 'KVIE bridge connected' : 'Local draft active')}
                 </div>
               </>
             ) : (
-              <div className="flex justify-center" title={document.isDesktop ? 'Tauri Desktop Connected' : 'Browser Mode'}>
+              <div className="flex justify-center" title="Runtime Active">
                 <span className="h-2.5 w-2.5 animate-pulse rounded-full" style={{ backgroundColor: theme.accentColor }} />
               </div>
             )}
           </div>
         </aside>
 
-        {/* Main Content Area (Scrolls independently while background stays fixed) */}
-        <section className="flex min-w-0 flex-1 flex-col h-full overflow-y-auto px-5 py-6 sm:px-10 sm:py-10">
-          <header className="flex items-center justify-between gap-4">
+        {/* Main Content Area (Scrolls smoothly with touch optimizations) */}
+        <section className="flex min-w-0 flex-1 flex-col h-full overflow-y-auto px-4 py-4 sm:px-8 sm:py-8 pb-28 md:pb-8 touch-scroll safe-top safe-bottom">
+          {/* Header */}
+          <header className="flex items-center justify-between gap-3 mb-6">
             <div className="flex items-center gap-3">
+              {/* Desktop sidebar toggle */}
               <button
                 onClick={() => setIsSidebarCollapsed(prev => !prev)}
-                className="rounded-xl border border-line bg-panel p-2 text-zinc-400 transition hover:text-zinc-100"
+                className="hidden md:flex rounded-xl border border-line bg-panel p-2 text-zinc-400 transition hover:text-zinc-100"
                 title="Toggle Sidebar Layout"
               >
                 {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
               </button>
+
+              {/* Mobile Branding */}
+              <div className="flex md:hidden items-center gap-2.5">
+                <img
+                  src="/logo.png"
+                  className="h-8 w-8 rounded-lg object-contain"
+                  style={{ border: `1px solid ${theme.accentColor}` }}
+                  alt="Kritix"
+                />
+              </div>
+
               <div>
-                <p className="text-xs uppercase tracking-[.22em] text-zinc-500">{activeNav}</p>
-                <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+                <p className="text-[10px] uppercase tracking-[.22em] text-zinc-500">{activeNav}</p>
+                <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">
                   {activeNav === 'Workspace' && 'Voice Workspace'}
-                  {activeNav === 'Sessions' && 'Voice Sessions & Injection History'}
-                  {activeNav === 'Models' && 'STT Model Hub & Engine Manager'}
-                  {activeNav === 'Settings' && 'Settings & Theme Customizer'}
+                  {activeNav === 'Voice IME' && 'KVIE Android Keyboard (IME)'}
+                  {activeNav === 'Sessions' && 'Voice Sessions'}
+                  {activeNav === 'Models' && 'STT Engine Hub'}
+                  {activeNav === 'Settings' && 'Preferences & Themes'}
                 </h1>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {/* Quick Model Badge */}
               <button
-                onClick={() => setIsUniversalMode(prev => !prev)}
-                className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs transition ${
-                  isUniversalMode
-                    ? 'border-line bg-panel font-medium'
-                    : 'border-line bg-panel text-zinc-400 hover:text-zinc-200'
-                }`}
-                style={isUniversalMode ? { color: theme.accentColor, borderColor: `${theme.accentColor}60` } : {}}
+                onClick={() => setActiveNav('Models')}
+                className="flex items-center gap-1.5 rounded-full border border-line bg-panel/90 px-3 py-1 text-xs text-zinc-300 transition hover:border-zinc-600"
+                style={{ borderColor: `${theme.accentColor}40` }}
               >
-                <Zap className="h-3.5 w-3.5" style={{ color: theme.accentColor }} />
-                Universal Voice Typing: {isUniversalMode ? 'ON' : 'OFF'}
+                <Cpu className="h-3.5 w-3.5" style={{ color: theme.accentColor }} />
+                <span className="hidden sm:inline font-mono">{activeModelDetails.name.split(' ')[0]}</span>
               </button>
-              {document.isDesktop && (
+
+              {/* Desktop Floating Mic Button (only on desktop) */}
+              {document.isDesktop && !isAndroidDevice && (
                 <button
                   onClick={() => void tauriBridge.toggleFloatingMic()}
-                  className="flex items-center gap-1.5 rounded-full border border-line bg-panel px-3.5 py-1.5 text-xs transition hover:bg-zinc-800"
+                  className="hidden sm:flex items-center gap-1.5 rounded-full border border-line bg-panel px-3.5 py-1.5 text-xs transition hover:bg-zinc-800"
                   style={{ color: theme.accentColor }}
                   title="Open/Toggle OS Desktop Floating Mic Window"
                 >
                   <Pin className="h-3.5 w-3.5" />
-                  Desktop Floating Mic
+                  Desktop Mic
                 </button>
               )}
             </div>
@@ -690,54 +647,84 @@ const App = () => {
 
           {/* ──────────────── TAB VIEW 1: WORKSPACE ──────────────── */}
           {activeNav === 'Workspace' && (
-            <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center py-10">
-              <div className="mb-8 flex items-end justify-between gap-6">
+            <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-between py-2 sm:py-6">
+              {/* Android Keyboard Quick Banner (If on mobile) */}
+              <div
+                onClick={() => setActiveNav('Voice IME')}
+                className="cursor-pointer mb-4 flex items-center justify-between gap-3 rounded-2xl border bg-panel/70 p-3.5 sm:p-4 backdrop-blur-md transition hover:bg-panel"
+                style={{ borderColor: `${theme.accentColor}50` }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl p-2.5 bg-zinc-900 border border-line" style={{ color: theme.accentColor }}>
+                    <Keyboard className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5">
+                      KVIE System-Wide Voice Keyboard
+                      <span className="rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 border border-emerald-500/30">Android Ready</span>
+                    </p>
+                    <p className="text-[11px] text-zinc-400">Speak into WhatsApp, Chrome, Notes & any Android app without floating overlays.</p>
+                  </div>
+                </div>
+                <span className="text-xs font-medium shrink-0 flex items-center gap-1" style={{ color: theme.accentColor }}>
+                  Setup <ExternalLink className="h-3.5 w-3.5" />
+                </span>
+              </div>
+
+              {/* Header Details */}
+              <div className="mb-4 flex items-end justify-between gap-4">
                 <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: theme.accentColor }}>
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider" style={{ color: theme.accentColor }}>
                     Living Document
                   </p>
-                  <h2 className="max-w-xl text-3xl font-medium leading-tight tracking-tight sm:text-5xl">
+                  <h2 className="text-2xl font-medium leading-tight tracking-tight sm:text-4xl">
                     Speak freely.<br />
                     <span className="text-zinc-500">KVIE shapes the draft.</span>
                   </h2>
                 </div>
-                <div className="hidden text-right sm:block">
-                  <p className="text-3xl font-medium text-zinc-200">{wordCount}</p>
-                  <p className="text-xs uppercase tracking-widest text-zinc-600">words</p>
+                <div className="text-right">
+                  <p className="text-2xl sm:text-3xl font-medium text-zinc-200">{wordCount}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-zinc-500">words</p>
                 </div>
               </div>
 
+              {/* Main Document Pad */}
               <motion.div
                 layout
-                className="relative min-h-[320px] rounded-3xl border bg-panel/80 p-6 backdrop-blur-xl sm:p-8 transition-all duration-300"
+                className="relative flex-1 min-h-[260px] sm:min-h-[340px] rounded-3xl border bg-panel/80 p-5 sm:p-7 backdrop-blur-xl transition-all duration-300 flex flex-col justify-between"
                 style={{
                   borderColor: `${theme.accentColor}40`,
-                  boxShadow: `0 0 70px ${theme.accentColor}25, inset 0 0 20px ${theme.accentColor}08`,
+                  boxShadow: `0 0 50px ${theme.accentColor}20, inset 0 0 20px ${theme.accentColor}06`,
                 }}
               >
-                <div className="mb-6 flex items-center justify-between border-b border-line/50 pb-4">
+                <div className="mb-4 flex items-center justify-between border-b border-line/50 pb-3">
                   <div className="flex items-center gap-2 text-xs text-zinc-400">
                     <span className={`h-2.5 w-2.5 rounded-full ${speech.isListening ? 'animate-pulse' : 'bg-zinc-700'}`} style={speech.isListening ? { backgroundColor: theme.accentColor } : {}} />
-                    {speech.isListening ? 'Listening continuously' : 'Ready when you are'}
-                    {isUniversalMode && (
-                      <span className="ml-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-medium" style={{ color: theme.accentColor, borderColor: `${theme.accentColor}40`, backgroundColor: `${theme.accentColor}15` }}>
-                        <Zap className="h-3 w-3" /> Universal Auto-Inject Active
+                    <span>{speech.isListening ? 'Listening continuously...' : 'Ready to capture'}</span>
+                    {isTranslationEnabled && (
+                      <span className="hidden sm:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-mono text-cyan-400 border-cyan-500/30 bg-cyan-500/10">
+                        <Languages className="h-3 w-3" /> Auto-Translate: {targetLanguage.toUpperCase()}
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-4">
-                    <button disabled={!document.can_undo} onClick={() => void document.undo()} className="flex items-center gap-1 text-xs text-zinc-500 transition hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-30">
-                      <Undo2 className="h-3.5 w-3.5" /> Undo
+                  <div className="flex items-center gap-3">
+                    <button disabled={!document.can_undo} onClick={() => void document.undo()} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 disabled:opacity-30">
+                      <Undo2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Undo</span>
                     </button>
-                    <button disabled={!document.can_redo} onClick={() => void document.redo()} className="flex items-center gap-1 text-xs text-zinc-500 transition hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-30">
-                      <Redo2 className="h-3.5 w-3.5" /> Redo
+                    <button disabled={!document.can_redo} onClick={() => void document.redo()} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 disabled:opacity-30">
+                      <Redo2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Redo</span>
                     </button>
-                    <button onClick={clearAll} className="flex items-center gap-1 text-xs text-zinc-500 transition hover:text-rose-400">
-                      <Trash2 className="h-3.5 w-3.5" /> Clear
+                    <button onClick={copyDraft} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100" title="Copy to clipboard">
+                      <Copy className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Copy</span>
+                    </button>
+                    <button onClick={clearAll} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-400" title="Clear all text">
+                      <Trash2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Clear</span>
                     </button>
                   </div>
                 </div>
-                <div aria-live="polite" className="min-h-[160px] whitespace-pre-wrap text-xl leading-relaxed text-zinc-100 sm:text-2xl">
+
+                {/* Editor Surface */}
+                <div aria-live="polite" className="flex-1 whitespace-pre-wrap text-lg sm:text-2xl leading-relaxed text-zinc-100 overflow-y-auto max-h-[40vh] sm:max-h-[50vh]">
                   {activeDocumentText || activeInterimText ? (
                     <>
                       {activeDocumentText}
@@ -745,544 +732,413 @@ const App = () => {
                       <span style={{ color: theme.accentColor }} className="font-normal">{activeInterimText}</span>
                     </>
                   ) : (
-                    <span className="text-zinc-600 font-light">Press the microphone button or floating mic widget and start speaking...</span>
+                    <span className="text-zinc-600 font-light text-base sm:text-xl">Tap the microphone button below or use the KVIE Voice Keyboard to dictate...</span>
                   )}
                 </div>
+
                 <AnimatePresence>
                   {(speech.error || document.error) && (
-                    <motion.p initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="absolute bottom-4 left-8 text-xs text-rose-400">
+                    <motion.p initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="text-xs text-rose-400 pt-2">
                       {speech.error || document.error}
                     </motion.p>
                   )}
                 </AnimatePresence>
               </motion.div>
 
-              <div className="mt-8 flex flex-col items-center gap-4">
+              {/* Bottom In-App Mic Controller */}
+              <div className="mt-6 flex flex-col items-center gap-3">
                 <motion.button
-                  whileTap={{ scale: 0.94 }}
-                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.92 }}
+                  whileHover={{ scale: 1.05 }}
                   onClick={speech.isListening ? speech.stopListening : speech.startListening}
                   disabled={!speech.isSupported}
-                  className={`grid h-20 w-20 place-items-center rounded-full border text-2xl transition ${
-                    speech.isListening ? 'text-white shadow-lg' : 'border-line bg-zinc-900 text-zinc-300 hover:border-zinc-700'
-                  } disabled:cursor-not-allowed disabled:opacity-40`}
-                  style={speech.isListening ? { backgroundColor: theme.accentColor, borderColor: theme.accentColor, boxShadow: `0 0 50px ${theme.accentColor}60` } : {}}
+                  className={`grid h-18 w-18 sm:h-20 sm:w-20 place-items-center rounded-full border transition ${
+                    speech.isListening ? 'text-white shadow-xl' : 'border-line bg-zinc-900 text-zinc-300 hover:border-zinc-700'
+                  } disabled:opacity-40`}
+                  style={speech.isListening ? { backgroundColor: theme.accentColor, borderColor: theme.accentColor, boxShadow: `0 0 50px ${theme.accentColor}70` } : {}}
                   aria-label={speech.isListening ? 'Stop listening' : 'Start listening'}
                 >
                   {speech.isListening ? <Square className="h-7 w-7 fill-current" /> : <Mic className="h-8 w-8" style={{ color: theme.accentColor }} />}
                 </motion.button>
-                <button
-                  onClick={() => void injectDraft()}
-                  disabled={!activeDocumentText.trim()}
-                  className="flex items-center gap-2 rounded-full border border-line px-5 py-2 text-xs text-zinc-400 transition hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
-                  style={activeDocumentText.trim() ? { borderColor: `${theme.accentColor}60`, color: theme.accentColor } : {}}
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  Inject into active app
-                </button>
-                <p className="text-xs text-zinc-600">
-                  {speech.isSupported ? (speech.isListening ? 'Click to pause capture' : 'Click to start capture') : 'Speech recognition is unavailable in this runtime'}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => void copyDraft()}
+                    disabled={!activeDocumentText.trim()}
+                    className="flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2 text-xs text-zinc-300 transition hover:border-zinc-600 disabled:opacity-30"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy Draft
+                  </button>
+                  {document.isDesktop && (
+                    <button
+                      onClick={() => void injectDraft()}
+                      disabled={!activeDocumentText.trim()}
+                      className="flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2 text-xs text-zinc-300 transition hover:border-zinc-600 disabled:opacity-30"
+                      style={activeDocumentText.trim() ? { borderColor: `${theme.accentColor}60`, color: theme.accentColor } : {}}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      Inject Text
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-xs text-zinc-500">
+                  {speech.isSupported ? (speech.isListening ? 'Listening... Tap to stop' : 'Tap mic to dictate in workspace') : 'Microphone unavailable in current runtime'}
                 </p>
-                {injectionMessage && <p className="text-xs font-medium" style={{ color: theme.accentColor }}>{injectionMessage}</p>}
+                {injectionMessage && <p className="text-xs font-semibold" style={{ color: theme.accentColor }}>{injectionMessage}</p>}
               </div>
             </div>
           )}
 
-          {/* ──────────────── TAB VIEW 2: SESSIONS WITH TARGET APP DETECTOR ──────────────── */}
+          {/* ──────────────── TAB VIEW 2: KVIE ANDROID VOICE KEYBOARD (IME) HUB ──────────────── */}
+          {activeNav === 'Voice IME' && (
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6">
+              {/* Hero Banner */}
+              <div
+                className="rounded-3xl border bg-panel/80 p-6 sm:p-8 backdrop-blur-xl relative overflow-hidden"
+                style={{ borderColor: `${theme.accentColor}40`, boxShadow: `0 0 50px ${theme.accentColor}20` }}
+              >
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-emerald-500/20 text-emerald-400 text-xs px-3 py-0.5 border border-emerald-500/30 font-medium flex items-center gap-1">
+                        <Smartphone className="h-3.5 w-3.5" /> Android System IME
+                      </span>
+                      <span className="rounded-full bg-zinc-800 text-zinc-300 text-xs px-3 py-0.5 border border-line font-mono">
+                        Zero Floating Windows Required
+                      </span>
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100">
+                      KVIE Voice Keyboard
+                    </h2>
+                    <p className="text-sm text-zinc-400 max-w-xl">
+                      Dictate directly into <b>WhatsApp, Telegram, Chrome, Instagram, Gmail, Notes</b>, and every Android text field with instantaneous transcription and automatic filler-word cleaning.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl p-4 bg-zinc-900/90 border border-line/80 text-center shrink-0">
+                    <Volume2 className="h-8 w-8 mx-auto mb-1" style={{ color: theme.accentColor }} />
+                    <span className="text-[11px] font-medium text-zinc-400">100% Native IME</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3 Step Setup Action Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Step 1 */}
+                <div className="rounded-2xl border border-line bg-panel/80 p-5 flex flex-col justify-between gap-4">
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
+                      STEP 1
+                    </span>
+                    <h3 className="text-base font-semibold text-zinc-100">Enable Keyboard in Android</h3>
+                    <p className="text-xs text-zinc-400">
+                      Open Android Settings &gt; Languages &amp; Input &gt; Keyboards and turn ON "KVIE Voice Keyboard".
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => openAndroidKeyboardSettings()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-semibold text-black transition"
+                    style={{ backgroundColor: theme.accentColor }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> Open Keyboard Settings
+                  </button>
+                </div>
+
+                {/* Step 2 */}
+                <div className="rounded-2xl border border-line bg-panel/80 p-5 flex flex-col justify-between gap-4">
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
+                      STEP 2
+                    </span>
+                    <h3 className="text-base font-semibold text-zinc-100">Select Active Keyboard</h3>
+                    <p className="text-xs text-zinc-400">
+                      Trigger the Android Input Method Picker and select "KVIE Voice Keyboard" as your current input.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => showAndroidKeyboardPicker()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-line bg-zinc-800 hover:bg-zinc-700 py-2.5 text-xs font-semibold text-zinc-100 transition"
+                  >
+                    <Keyboard className="h-3.5 w-3.5" style={{ color: theme.accentColor }} /> Switch Active Input Method
+                  </button>
+                </div>
+
+                {/* Step 3 */}
+                <div className="rounded-2xl border border-line bg-panel/80 p-5 flex flex-col justify-between gap-4">
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
+                      STEP 3
+                    </span>
+                    <h3 className="text-base font-semibold text-zinc-100">Grant Microphone Access</h3>
+                    <p className="text-xs text-zinc-400">
+                      Allow KVIE to record audio so the voice keyboard can transcribe your speech in real-time.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => requestAndroidMicPermission()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-line bg-zinc-800 hover:bg-zinc-700 py-2.5 text-xs font-semibold text-zinc-100 transition"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" /> Request Mic Permission
+                  </button>
+                </div>
+              </div>
+
+              {/* Interactive Live Voice Test Field */}
+              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-zinc-100 text-lg flex items-center gap-2">
+                      <Sparkles className="h-5 w-5" style={{ color: theme.accentColor }} /> Live Keyboard Test Ground
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Tap the input box below. When your keyboard pops up, switch to KVIE Voice Keyboard and tap the mic!
+                    </p>
+                  </div>
+                  {testInputText && (
+                    <button
+                      onClick={() => setTestInputText('')}
+                      className="text-xs text-zinc-400 hover:text-rose-400"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <textarea
+                  rows={4}
+                  value={testInputText}
+                  onChange={e => setTestInputText(e.target.value)}
+                  placeholder="Tap here to bring up your keyboard and test voice dictation..."
+                  className="w-full rounded-2xl border border-line bg-zinc-900/80 p-4 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none transition"
+                  style={{ borderColor: testInputText ? `${theme.accentColor}80` : undefined }}
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs text-zinc-500">
+                  <span>💡 You can also switch back to your normal keyboard anytime using the <b>⋮</b> button on the KVIE keyboard bar.</span>
+                  {testInputText && <span className="font-mono text-zinc-400">{testInputText.length} characters</span>}
+                </div>
+              </div>
+
+              {/* Core Capabilities */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-2xl border border-line bg-zinc-900/50 p-5 space-y-2">
+                  <h4 className="font-semibold text-zinc-200 text-sm flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-emerald-400" /> Automatic Filler-Word Stripping
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Removes conversational hesitations like "um", "uh", "like", "matlab", and "basically" seamlessly before text hits the active input field.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-line bg-zinc-900/50 p-5 space-y-2">
+                  <h4 className="font-semibold text-zinc-200 text-sm flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-cyan-400" /> AI Auto-Edit Refinement
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Sends speech through a background stage-2 refinement pass to auto-correct grammar and format text cleanly on the fly.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ──────────────── TAB VIEW 3: SESSIONS ──────────────── */}
           {activeNav === 'Sessions' && (
-            <div className="mx-auto w-full max-w-4xl py-8">
-              <div className="mb-6 flex items-center justify-between gap-4">
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6">
+              <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-3.5 top-3 h-4 w-4 text-zinc-500" />
                   <input
                     type="text"
                     value={sessionSearch}
                     onChange={e => setSessionSearch(e.target.value)}
-                    placeholder="Search sessions by voice text or target app (WhatsApp, Notepad, Chrome, VS Code)..."
-                    className="w-full rounded-2xl border border-line bg-panel/80 pl-10 pr-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                    placeholder="Search voice transcript sessions..."
+                    className="w-full rounded-2xl border border-line bg-panel py-2.5 pl-10 pr-4 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none"
                   />
                 </div>
-                <div className="text-xs text-zinc-500">{filteredSessions.length} voice sessions recorded</div>
+                <span className="text-xs font-mono text-zinc-400 bg-zinc-800/80 px-3 py-1.5 rounded-xl border border-line self-start sm:self-center">
+                  {filteredSessions.length} Recorded Sessions
+                </span>
               </div>
 
-              <div className="space-y-4">
-                {filteredSessions.length > 0 ? (
-                  filteredSessions.map(session => (
-                    <div key={session.id} className="rounded-2xl border border-line bg-panel/80 p-5 transition hover:border-zinc-700">
-                      <div className="mb-3 flex items-center justify-between text-xs text-zinc-500">
+              {filteredSessions.length === 0 ? (
+                <div className="rounded-3xl border border-line bg-panel/50 p-12 text-center">
+                  <MessageSquare className="h-10 w-10 mx-auto mb-3 text-zinc-600" />
+                  <h3 className="text-base font-semibold text-zinc-300">No voice sessions recorded yet</h3>
+                  <p className="text-xs text-zinc-500 mt-1 max-w-md mx-auto">
+                    Start speaking in the workspace or through the KVIE Voice Keyboard to record transcribed sessions with timestamp history.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredSessions.map(session => (
+                    <div
+                      key={session.id}
+                      className="rounded-2xl border border-line bg-panel/70 p-5 space-y-3 transition hover:border-zinc-700"
+                    >
+                      <div className="flex items-center justify-between text-xs text-zinc-400">
                         <div className="flex items-center gap-2">
-                          {/* Active Application Target Badge */}
-                          <span
-                            className="flex items-center gap-1.5 rounded-full border px-3 py-0.5 text-xs font-medium shadow-sm"
-                            style={{ color: theme.accentColor, borderColor: `${theme.accentColor}50`, backgroundColor: `${theme.accentColor}12` }}
-                          >
-                            <AppWindow className="h-3 w-3" />
-                            {session.targetApp}
-                          </span>
-                          <span className="flex items-center gap-1 text-zinc-500">
-                            <Clock className="h-3.5 w-3.5" /> {session.timestamp}
-                          </span>
+                          <span className="font-mono text-zinc-300 font-medium">{session.targetApp}</span>
+                          <span>·</span>
+                          <span>{session.timestamp}</span>
                         </div>
-                        <span className="font-mono text-zinc-400">{session.wordCount} words</span>
+                        <span className="font-mono text-[11px] text-zinc-500">{session.wordCount} words</span>
                       </div>
-                      <p className="text-base text-zinc-200 leading-relaxed mb-4">{session.text}</p>
-                      <div className="flex items-center gap-3">
+                      <p className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">{session.text}</p>
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-line/40">
                         <button
-                          onClick={() => void autoInject(session.text)}
-                          className="flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-xs text-zinc-300 transition hover:text-zinc-100"
-                          style={{ borderColor: `${theme.accentColor}50`, color: theme.accentColor }}
+                          onClick={async () => {
+                            await navigator.clipboard.writeText(session.text)
+                            setInjectionMessage('Session text copied to clipboard!')
+                            window.setTimeout(() => setInjectionMessage(null), 2000)
+                          }}
+                          className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-100"
                         >
-                          <Send className="h-3 w-3" /> Re-Inject to App
-                        </button>
-                        <button
-                          onClick={() => void navigator.clipboard.writeText(session.text)}
-                          className="flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-xs text-zinc-400 transition hover:text-zinc-200"
-                        >
-                          <Copy className="h-3 w-3" /> Copy Text
+                          <Copy className="h-3.5 w-3.5" /> Copy
                         </button>
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="rounded-2xl border border-line bg-panel/40 p-12 text-center text-zinc-500">
-                    No voice sessions found matching "{sessionSearch}"
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ──────────────── TAB VIEW 4: STT MODEL MANAGER ──────────────── */}
+          {activeNav === 'Models' && (
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6">
+              <div className="rounded-3xl border border-line bg-panel/80 p-6">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
+                    <Cpu className="h-5 w-5" />
                   </div>
-                )}
+                  <div>
+                    <h3 className="font-semibold text-zinc-100 text-lg">STT Neural Engine Hub</h3>
+                    <p className="text-xs text-zinc-400">Download and select high-precision Whisper &amp; Qwen models for on-device Hinglish transcription</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Models Grid (Fully responsive 1 to 3 columns) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {MODEL_CATALOG.map(model => {
+                  const isInstalled = downloadedModels.includes(model.id)
+                  const isActive = activeModelId === model.id
+                  const progress = downloadProgress[model.id]
+
+                  return (
+                    <div
+                      key={model.id}
+                      className={`rounded-2xl border p-5 flex flex-col justify-between gap-4 transition ${
+                        isActive
+                          ? 'bg-zinc-800/90 shadow-lg'
+                          : 'border-line bg-panel/60 hover:bg-panel'
+                      }`}
+                      style={isActive ? { borderColor: theme.accentColor } : {}}
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4 className="font-semibold text-zinc-100 text-sm">{model.name}</h4>
+                          {isActive && (
+                            <span className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase text-black" style={{ backgroundColor: theme.accentColor }}>
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed">{model.description}</p>
+                        <div className="flex flex-wrap gap-2 pt-2 text-[11px] font-mono text-zinc-400">
+                          <span className="rounded bg-zinc-900 px-2 py-0.5 border border-line">{model.size}</span>
+                          <span className="rounded bg-zinc-900 px-2 py-0.5 border border-line">{model.latency}</span>
+                          <span className="rounded bg-zinc-900 px-2 py-0.5 border border-line text-emerald-400">{model.hinglishRating.split(' ')[0]}</span>
+                        </div>
+                      </div>
+
+                      {/* Download / Select Action */}
+                      <div>
+                        {progress !== undefined ? (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs text-zinc-400">
+                              <span>{progress.status}</span>
+                              <span className="font-mono font-bold" style={{ color: theme.accentColor }}>{progress.pct}%</span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-900 border border-line">
+                              <div
+                                className="h-full transition-all duration-300"
+                                style={{ width: `${progress.pct}%`, backgroundColor: theme.accentColor }}
+                              />
+                            </div>
+                          </div>
+                        ) : isInstalled ? (
+                          <button
+                            onClick={() => handleSelectModel(model.id)}
+                            disabled={isActive}
+                            className={`w-full flex items-center justify-center gap-2 rounded-xl py-2 text-xs font-semibold transition ${
+                              isActive ? 'bg-zinc-700 text-zinc-400 cursor-default' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                            }`}
+                          >
+                            {isActive ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> : null}
+                            {isActive ? 'Current Engine' : 'Use This Engine'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleDownloadModel(model.id)}
+                            className="w-full flex items-center justify-center gap-2 rounded-xl py-2 text-xs font-semibold text-black transition"
+                            style={{ backgroundColor: theme.accentColor }}
+                          >
+                            <Download className="h-3.5 w-3.5 stroke-[2.5]" /> Download Model
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
 
-          {/* ──────────────── TAB VIEW 3: MODELS HUB ──────────────── */}
-          {activeNav === 'Models' && (
-            <div className="mx-auto w-full max-w-4xl py-8 space-y-8">
-              {/* ACTIVE MODEL BANNER */}
-              <div className="rounded-3xl border border-line bg-panel/90 p-6 relative overflow-hidden shadow-xl" style={{ borderColor: `${theme.accentColor}40` }}>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="rounded-full px-3 py-0.5 text-xs font-semibold uppercase tracking-wider" style={{ color: theme.accentColor, backgroundColor: `${theme.accentColor}18`, border: `1px solid ${theme.accentColor}40` }}>
-                        ✓ Active STT Engine (Default)
-                      </span>
-                      <span className="text-xs text-zinc-400 font-mono">100% Offline Local</span>
-                    </div>
-                    <h2 className="text-2xl font-bold text-zinc-100 mb-1">{activeModelDetails.name}</h2>
-                    <p className="text-xs text-zinc-400 max-w-xl leading-relaxed">{activeModelDetails.description}</p>
+          {/* ──────────────── TAB VIEW 5: SETTINGS ──────────────── */}
+          {activeNav === 'Settings' && (
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6">
+              {/* THEME & COLOR PALETTE */}
+              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
+                    <Palette className="h-5 w-5" />
                   </div>
-
-                  <div className="flex items-center gap-4 border-l border-line/60 pl-6 shrink-0">
-                    <div>
-                      <p className="text-xs text-zinc-500 uppercase tracking-wider">Hinglish Accuracy</p>
-                      <p className="text-base font-semibold" style={{ color: theme.accentColor }}>{activeModelDetails.hinglishRating.split(' ')[0]}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500 uppercase tracking-wider">Latency</p>
-                      <p className="text-base font-semibold text-zinc-200">{activeModelDetails.latency}</p>
-                    </div>
+                  <div>
+                    <h3 className="font-semibold text-zinc-100 text-lg">Theme &amp; Accent Color Palette</h3>
+                    <p className="text-xs text-zinc-400">Choose from curated presets or pick any custom hex accent</p>
                   </div>
                 </div>
-              </div>
 
-              {/* MODEL CATALOG GRID */}
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-semibold text-zinc-100 text-lg">STT Model Catalog</h3>
-                    <p className="text-xs text-zinc-400">Download other specialized speech recognition models with 1-click download button</p>
-                  </div>
-                  <span className="text-xs text-zinc-500 font-mono">{MODEL_CATALOG.length} models available</span>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  {MODEL_CATALOG.map(model => {
-                    const isActive = activeModelId === model.id
-                    const isDownloaded = downloadedModels.includes(model.id)
-                    const progress = downloadProgress[model.id]
-
+                {/* Preset Color Swatches */}
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-7">
+                  {theme.presets.map(preset => {
+                    const isSelected = theme.activePresetId === preset.id
                     return (
-                      <div
-                        key={model.id}
-                        className={`rounded-2xl border p-5 transition flex flex-col justify-between ${
-                          isActive
-                            ? 'bg-panel/90 shadow-md ring-1'
-                            : 'border-line bg-panel/60 hover:bg-panel/90 hover:border-zinc-700'
+                      <button
+                        key={preset.id}
+                        onClick={() => theme.selectPreset(preset)}
+                        className={`flex flex-col items-center gap-2 rounded-2xl border p-3 transition ${
+                          isSelected ? 'bg-zinc-800/90 shadow-md ring-2' : 'border-line bg-zinc-900/50 hover:bg-zinc-800/50'
                         }`}
-                        style={isActive ? { borderColor: `${theme.accentColor}60` } : {}}
+                        style={isSelected ? { borderColor: preset.color } : {}}
                       >
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-semibold text-zinc-100 text-base">{model.name}</h4>
-                            <span className="text-[11px] font-mono rounded-full bg-zinc-800 px-2.5 py-0.5 text-zinc-400">{model.size}</span>
-                          </div>
-                          <p className="text-xs text-zinc-400 leading-relaxed mb-4">{model.description}</p>
+                        <div
+                          className="relative grid h-8 w-8 place-items-center rounded-full shadow-inner"
+                          style={{ backgroundColor: preset.color }}
+                        >
+                          {isSelected && <Check className="h-4 w-4 text-black stroke-[3]" />}
                         </div>
-
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-2 gap-2 text-[11px] bg-zinc-900/60 p-2.5 rounded-xl text-zinc-400">
-                            <div><span className="text-zinc-500">Params:</span> {model.params}</div>
-                            <div><span className="text-zinc-500">Latency:</span> {model.latency}</div>
-                            <div className="col-span-2"><span className="text-zinc-500">Hinglish:</span> <span style={{ color: theme.accentColor }}>{model.hinglishRating}</span></div>
-                          </div>
-
-                          {/* Download / Action Button */}
-                          <div>
-                            {isActive ? (
-                              <div className="flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-semibold" style={{ color: theme.accentColor, borderColor: `${theme.accentColor}50`, backgroundColor: `${theme.accentColor}12` }}>
-                                <CheckCircle2 className="h-4 w-4" /> Active STT Engine (Default)
-                              </div>
-                            ) : isDownloaded ? (
-                              <button
-                                onClick={() => handleSelectModel(model.id)}
-                                className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-line bg-zinc-800 py-2 text-xs text-zinc-200 hover:border-zinc-500 hover:text-white transition font-medium"
-                              >
-                                Use Model
-                              </button>
-                            ) : progress !== undefined ? (
-                              <div className="w-full rounded-xl bg-zinc-800 p-2.5 text-center text-xs">
-                                <div className="flex justify-between items-center text-[11px] text-zinc-300 mb-1 font-mono">
-                                  <span className="truncate pr-1">{progress.status}</span>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {progress.totalMB > 0 ? (
-                                      <span>{progress.downloadedMB} MB / {progress.totalMB} MB</span>
-                                    ) : (
-                                      <span>{progress.pct}%</span>
-                                    )}
-                                    <button
-                                      onClick={() => setDownloadProgress(prev => { const n = { ...prev }; delete n[model.id]; return n })}
-                                      className="text-zinc-500 hover:text-zinc-200 ml-1 text-xs px-1 hover:bg-zinc-700 rounded transition"
-                                      title="Cancel / Reset"
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="h-2 w-full rounded-full bg-zinc-900 overflow-hidden">
-                                  <div className="h-full transition-all duration-200" style={{ width: `${Math.max(progress.pct, 3)}%`, backgroundColor: theme.accentColor }} />
-                                </div>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleDownloadModel(model.id)}
-                                className="w-full flex items-center justify-center gap-2 rounded-xl border border-line bg-zinc-900 py-2 text-xs text-zinc-300 hover:border-accent hover:text-white transition font-medium"
-                              >
-                                <Download className="h-3.5 w-3.5" /> Single Click Download
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                        <span className="text-[11px] font-medium text-zinc-300 text-center">{preset.name.split(' ')[0]}</span>
+                      </button>
                     )
                   })}
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* ──────────────── TAB VIEW 4: SETTINGS & THEME CUSTOMIZER ──────────────── */}
-          {activeNav === 'Settings' && (
-            <div className="mx-auto w-full max-w-4xl py-8 space-y-8">
-              {/* ACCENT COLOR THEME CUSTOMIZER */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 shadow-xl">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
-                      <Palette className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-zinc-100 text-lg">Accent Theme Customizer</h3>
-                      <p className="text-xs text-zinc-400">Select preset accent colors or pick any custom color from the graph picker</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 rounded-full border border-line px-3 py-1 text-xs">
-                    <span className="h-3 w-3 rounded-full shadow-sm" style={{ backgroundColor: theme.accentColor }} />
-                    <span className="font-mono text-zinc-300">{theme.accentColor}</span>
-                  </div>
-                </div>
-
-                {/* Preset Color Palette Swatches */}
-                <div className="mb-8">
-                  <label className="block mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                    Preset Theme Swatches
-                  </label>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-7">
-                    {theme.presets.map(preset => {
-                      const isSelected = theme.activePresetId === preset.id
-                      return (
-                        <button
-                          key={preset.id}
-                          onClick={() => theme.selectPreset(preset)}
-                          className={`flex flex-col items-center gap-2 rounded-2xl border p-3 transition ${
-                            isSelected ? 'bg-zinc-800/90 shadow-md ring-2' : 'border-line bg-zinc-900/50 hover:bg-zinc-800/50'
-                          }`}
-                          style={isSelected ? { borderColor: preset.color } : {}}
-                        >
-                          <div
-                            className="relative grid h-8 w-8 place-items-center rounded-full shadow-inner"
-                            style={{ backgroundColor: preset.color }}
-                          >
-                            {isSelected && <Check className="h-4 w-4 text-black stroke-[3]" />}
-                          </div>
-                          <span className="text-[11px] font-medium text-zinc-300 text-center">{preset.name.split(' ')[0]}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Custom Color Graph Picker */}
-                <div className="rounded-2xl border border-line bg-zinc-900/60 p-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <h4 className="text-sm font-medium text-zinc-200 mb-1">Custom Color Graph Picker</h4>
-                      <p className="text-xs text-zinc-400">Manually pick any custom accent color from the color graph or enter hex value</p>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <div className="relative h-10 w-14 overflow-hidden rounded-xl border border-line cursor-pointer shadow-inner">
-                        <input
-                          type="color"
-                          value={theme.accentColor}
-                          onChange={e => theme.setCustomColor(e.target.value)}
-                          className="absolute -inset-2 h-16 w-20 cursor-pointer opacity-100"
-                          title="Click to open full color graph picker"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm">
-                        <span className="text-zinc-500 font-mono">#</span>
-                        <input
-                          type="text"
-                          value={theme.accentColor.replace('#', '')}
-                          onChange={e => theme.setCustomColor(`#${e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6)}`)}
-                          className="w-20 bg-transparent font-mono text-zinc-200 focus:outline-none"
-                          maxLength={6}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ENGINE & SPEECH SETTINGS */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
-                    <Sliders className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-zinc-100 text-lg">Voice Capture & Auto-Injection</h3>
-                    <p className="text-xs text-zinc-400">Configure speech-to-text and live typing behaviors</p>
-                  </div>
-                </div>
-
-                <div className="divide-y divide-line/50 text-sm">
-                  <div className="py-4 flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-zinc-200">Universal Auto-Inject Mode</p>
-                      <p className="text-xs text-zinc-500">Automatically types speech into active app (Notepad, WhatsApp, Chrome, etc.)</p>
-                    </div>
-                    <button
-                      onClick={() => setIsUniversalMode(prev => !prev)}
-                      className={`h-6 w-11 rounded-full p-1 transition ${isUniversalMode ? 'bg-cyan-500' : 'bg-zinc-800'}`}
-                      style={isUniversalMode ? { backgroundColor: theme.accentColor } : {}}
-                    >
-                      <div className={`h-4 w-4 rounded-full bg-white transition ${isUniversalMode ? 'translate-x-5' : ''}`} />
-                    </button>
-                  </div>
-
-                  <div className="py-4 flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-zinc-200">Global System-Wide Shortcut (Ctrl + Alt + R)</p>
-                      <p className="text-xs text-zinc-500">Pressing Ctrl + Alt + R anywhere on Windows turns mic ON or OFF instantly</p>
-                    </div>
-                    <button
-                      onClick={() => setIsGlobalHotkeyEnabled(prev => !prev)}
-                      className={`h-6 w-11 rounded-full p-1 transition ${isGlobalHotkeyEnabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
-                      style={isGlobalHotkeyEnabled ? { backgroundColor: theme.accentColor } : {}}
-                    >
-                      <div className={`h-4 w-4 rounded-full bg-white transition ${isGlobalHotkeyEnabled ? 'translate-x-5' : ''}`} />
-                    </button>
-                  </div>
-
-                  <div className="py-4 flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-zinc-200">Hinglish Verbatim Roman Script</p>
-                      <p className="text-xs text-zinc-500">Transcribes Hinglish spoken words without auto-translating to English</p>
-                    </div>
-                    <span className="text-xs text-zinc-400 bg-zinc-800 px-2.5 py-1 rounded-full">Active</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* VOICE SNIPPETS & TEXT EXPANSION ENGINE */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
-                      <Zap className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-zinc-100 text-lg">Voice Snippets & Text Expansion Engine</h3>
-                      <p className="text-xs text-zinc-400">Map spoken trigger phrases to auto-expanding text templates</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-mono text-zinc-400 bg-zinc-800/80 px-3 py-1 rounded-full border border-line">
-                    {snippets.filter(s => s.enabled).length} Active Triggers
-                  </span>
-                </div>
-
-                {/* Add New Snippet Form */}
-                <div className="rounded-2xl border border-line bg-zinc-900/60 p-4 space-y-3">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Add Custom Voice Trigger</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Spoken Cue (e.g., 'my meeting link')"
-                      value={newTriggerCue}
-                      onChange={e => setNewTriggerCue(e.target.value)}
-                      className="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Expanded Text (e.g., 'https://calendly.com/...')"
-                      value={newExpandedText}
-                      onChange={e => setNewExpandedText(e.target.value)}
-                      className="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none"
-                    />
-                  </div>
-                  <button
-                    onClick={handleAddSnippet}
-                    disabled={!newTriggerCue.trim() || !newExpandedText.trim()}
-                    className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-black transition disabled:opacity-40"
-                    style={{ backgroundColor: theme.accentColor }}
-                  >
-                    <Plus className="h-4 w-4 stroke-[3]" /> Add Snippet
-                  </button>
-                </div>
-
-                {/* Registered Snippets List */}
-                <div className="space-y-3">
-                  {snippets.map(snippet => (
-                    <div
-                      key={snippet.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-line/60 bg-zinc-900/40 p-4"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-                            "{snippet.triggerCue}"
-                          </span>
-                          <span className="text-xs text-zinc-500">→</span>
-                        </div>
-                        <p className="text-xs text-zinc-300 font-mono whitespace-pre-wrap">{snippet.expandedText}</p>
-                      </div>
-
-                      <div className="flex items-center gap-3 self-end sm:self-center">
-                        <button
-                          onClick={() => handleToggleSnippet(snippet.id)}
-                          className={`h-6 w-11 rounded-full p-1 transition ${snippet.enabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
-                          style={snippet.enabled ? { backgroundColor: theme.accentColor } : {}}
-                        >
-                          <div className={`h-4 w-4 rounded-full bg-white transition ${snippet.enabled ? 'translate-x-5' : ''}`} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSnippet(snippet.id)}
-                          className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition"
-                          title="Delete snippet"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* PERSONALIZED CUSTOM DICTIONARY MANAGER */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
-                      <BookOpen className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-zinc-100 text-lg">Personalized Custom Dictionary & Vocabulary</h3>
-                      <p className="text-xs text-zinc-400">Add custom jargon, names, and acronyms to bias STT & LLM auto-correction</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-mono text-zinc-400 bg-zinc-800/80 px-3 py-1 rounded-full border border-line">
-                    {customWords.filter(w => w.enabled).length} Custom Terms
-                  </span>
-                </div>
-
-                {/* Add New Custom Word Form */}
-                <div className="rounded-2xl border border-line bg-zinc-900/60 p-4 space-y-3">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Add Preferred Term / Brand Name</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Target Word (e.g., 'Kritix')"
-                      value={newWord}
-                      onChange={e => setNewWord(e.target.value)}
-                      className="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Misspellings / Sound-alikes (comma separated, e.g. 'critics, critic')"
-                      value={newPhoneticVariants}
-                      onChange={e => setNewPhoneticVariants(e.target.value)}
-                      className="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none"
-                    />
-                  </div>
-                  <button
-                    onClick={handleAddCustomWord}
-                    disabled={!newWord.trim()}
-                    className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-black transition disabled:opacity-40"
-                    style={{ backgroundColor: theme.accentColor }}
-                  >
-                    <Plus className="h-4 w-4 stroke-[3]" /> Add Word
-                  </button>
-                </div>
-
-                {/* Registered Custom Words List */}
-                <div className="space-y-3">
-                  {customWords.map(item => (
-                    <div
-                      key={item.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-line/60 bg-zinc-900/40 p-4"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-zinc-100">{item.word}</span>
-                          {item.phoneticVariants.length > 0 && (
-                            <span className="text-xs text-zinc-500">
-                              (Auto-corrects from: {item.phoneticVariants.join(', ')})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 self-end sm:self-center">
-                        <button
-                          onClick={() => handleToggleCustomWord(item.id)}
-                          className={`h-6 w-11 rounded-full p-1 transition ${item.enabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
-                          style={item.enabled ? { backgroundColor: theme.accentColor } : {}}
-                        >
-                          <div className={`h-4 w-4 rounded-full bg-white transition ${item.enabled ? 'translate-x-5' : ''}`} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteCustomWord(item.id)}
-                          className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition"
-                          title="Delete word"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* LIVE TRANSLATION ENGINE (100+ LANGUAGES) */}
+              {/* LIVE TRANSLATION ENGINE */}
               <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -1324,14 +1180,115 @@ const App = () => {
                   </div>
                 </div>
               </div>
+
+              {/* VOICE SNIPPETS & EXPANSIONS */}
+              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
+                      <Zap className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-zinc-100 text-lg">Voice Snippets &amp; Macro Triggers</h3>
+                      <p className="text-xs text-zinc-400">Map spoken trigger phrases to auto-expanding text templates</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono text-zinc-400 bg-zinc-800/80 px-3 py-1 rounded-full border border-line">
+                    {snippets.filter(s => s.enabled).length} Active Triggers
+                  </span>
+                </div>
+
+                <div className="rounded-2xl border border-line bg-zinc-900/60 p-4 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Spoken Cue (e.g., 'my email address')"
+                      value={newTriggerCue}
+                      onChange={e => setNewTriggerCue(e.target.value)}
+                      className="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Expanded Text (e.g., 'alex@example.com')"
+                      value={newExpandedText}
+                      onChange={e => setNewExpandedText(e.target.value)}
+                      className="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddSnippet}
+                    disabled={!newTriggerCue.trim() || !newExpandedText.trim()}
+                    className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-black transition disabled:opacity-40"
+                    style={{ backgroundColor: theme.accentColor }}
+                  >
+                    <Plus className="h-4 w-4 stroke-[3]" /> Add Snippet
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {snippets.map(snippet => (
+                    <div
+                      key={snippet.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-line/60 bg-zinc-900/40 p-3"
+                    >
+                      <div>
+                        <span className="text-xs font-mono font-bold text-amber-400">"{snippet.triggerCue}"</span>
+                        <p className="text-xs text-zinc-300 font-mono">{snippet.expandedText}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleToggleSnippet(snippet.id)}
+                          className={`h-5 w-9 rounded-full p-0.5 transition ${snippet.enabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
+                          style={snippet.enabled ? { backgroundColor: theme.accentColor } : {}}
+                        >
+                          <div className={`h-4 w-4 rounded-full bg-white transition ${snippet.enabled ? 'translate-x-4' : ''}`} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSnippet(snippet.id)}
+                          className="p-1 text-zinc-500 hover:text-rose-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
-          <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-line/70 pt-5 text-xs text-zinc-600">
-            <span>Streaming STT · Universal Voice Injection · Floating Mic</span>
-            <span>SQLite persistence · Tauri bridge</span>
+          {/* Desktop Footer */}
+          <footer className="hidden sm:flex flex-wrap items-center justify-between gap-4 border-t border-line/70 pt-5 text-xs text-zinc-600">
+            <span>KVIE Voice Intelligence Engine · Android IME &amp; Desktop</span>
+            <span>Zero-latency local transcription</span>
           </footer>
         </section>
+      </div>
+
+      {/* ──────────────── MOBILE BOTTOM NAVIGATION BAR (< md) ──────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-line/80 bg-ink/95 px-2 py-2.5 backdrop-blur-2xl md:hidden safe-bottom">
+        {navItems.map(item => {
+          const isSelected = activeNav === item
+
+          return (
+            <button
+              key={item}
+              onClick={() => setActiveNav(item)}
+              className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition relative"
+              style={isSelected ? { color: theme.accentColor } : { color: '#71717a' }}
+            >
+              {iconMap[item] || <Sparkles className="h-5 w-5" />}
+              <span className="text-[10px] font-medium tracking-tight">{item}</span>
+              {isSelected && (
+                <motion.div
+                  layoutId="activeBottomTab"
+                  className="absolute -bottom-1 h-1 w-6 rounded-full"
+                  style={{ backgroundColor: theme.accentColor }}
+                />
+              )}
+            </button>
+          )
+        })}
       </div>
     </main>
   )

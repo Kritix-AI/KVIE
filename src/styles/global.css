@@ -63,3 +63,28 @@ body.floating-window-mode #root {
   background: transparent !important;
   overflow: hidden !important;
 }
+
+/* Mobile Safe Areas and Touch Optimizations */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+button, input, textarea, a, select {
+  touch-action: manipulation;
+}
+
+/* Prevent pull-to-refresh on Android webview if needed */
+body {
+  overscroll-behavior-y: none;
+}
+
