@@ -10,7 +10,7 @@ export interface ModelProgressPayload {
   progress: number // 0 to 100
   downloaded_bytes?: number
   total_bytes?: number
-  status: 'starting' | 'connecting' | 'downloading' | 'completed' | 'error' | string
+  status: 'starting' | 'connecting' | 'downloading' | 'completed' | 'error' | 'idle' | string
   speed?: string
   error?: string
 }
@@ -59,6 +59,7 @@ export function downloadModelWithProgress(
 ): () => void {
   let isCancelled = false
   let isFinished = false
+  let pollTimer: any = null
   let unlistenFn: (() => void) | null = null
 
   const handlePayload = (payload: ModelProgressPayload) => {
@@ -69,74 +70,53 @@ export function downloadModelWithProgress(
 
     if (payload.status === 'completed' || payload.progress >= 100) {
       isFinished = true
+      if (pollTimer) clearInterval(pollTimer)
       onComplete()
     } else if (payload.status === 'error') {
       isFinished = true
+      if (pollTimer) clearInterval(pollTimer)
       onError(payload.error || 'Failed to download model weights')
     }
   }
 
-  const abortController = new AbortController()
-
-  // 1. Primary: Direct Fetch Stream with ReadableStream reader
-  const startFetchStream = async () => {
+  // 1. Trigger background download on backend
+  const startDownload = async () => {
     try {
-      const res = await fetch(
-        `${SERVICE_BASE_URL}/api/models/download?model_id=${encodeURIComponent(modelId)}`,
-        { signal: abortController.signal }
-      )
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-      }
-
-      if (!res.body) {
-        throw new Error('No streaming response body available')
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder('utf-8')
-      let buffer = ''
-
-      while (!isCancelled && !isFinished) {
-        const { value, done } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (trimmed.startsWith('data:')) {
-            try {
-              const data: ModelProgressPayload = JSON.parse(trimmed.slice(5).trim())
-              handlePayload(data)
-            } catch {
-              // ignore parse errors
-            }
-          }
-        }
-      }
-
-      if (!isFinished && !isCancelled) {
-        isFinished = true
-        onComplete()
-      }
-    } catch (err: any) {
-      if (isCancelled || isFinished) return
-      // If fetch fails, try native Tauri invoke fallback
+      await fetch(`${SERVICE_BASE_URL}/api/models/download/start?model_id=${encodeURIComponent(modelId)}`, {
+        method: 'POST',
+      })
+    } catch {
+      // If REST start fails, try native Tauri invoke
       try {
         await invoke('download_model_native', { model_id: modelId, modelId })
-      } catch (nativeErr) {
-        onError(err?.message || String(nativeErr))
+      } catch {
+        // Fallback
       }
     }
+
+    // 2. Poll in-memory progress every 150ms (ultra-fast, zero-buffering)
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(async () => {
+      if (isCancelled || isFinished) {
+        clearInterval(pollTimer)
+        return
+      }
+
+      try {
+        const res = await fetch(`${SERVICE_BASE_URL}/api/models/progress?model_id=${encodeURIComponent(modelId)}`)
+        if (res.ok) {
+          const payload: ModelProgressPayload = await res.json()
+          handlePayload(payload)
+        }
+      } catch {
+        // Service temporarily busy
+      }
+    }, 150)
   }
 
-  void startFetchStream()
+  void startDownload()
 
-  // 2. Secondary: Listen to native Tauri events
+  // 3. Also listen to native Tauri events as secondary channel
   try {
     void listen<string>('model-download-progress', event => {
       try {
@@ -154,7 +134,7 @@ export function downloadModelWithProgress(
 
   return () => {
     isCancelled = true
-    abortController.abort()
+    if (pollTimer) clearInterval(pollTimer)
     if (unlistenFn) unlistenFn()
   }
 }

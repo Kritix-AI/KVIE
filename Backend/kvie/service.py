@@ -76,6 +76,22 @@ async def select_model(req: SelectModelRequest):
     return JSONResponse({"ok": success, "active": req.model_id})
 
 
+@app.post("/api/models/download/start")
+@app.get("/api/models/download/start")
+@app.post("/models/download/start")
+@app.get("/models/download/start")
+async def start_model_download(model_id: str):
+    success = ModelManager.start_download_background(model_id)
+    return JSONResponse({"ok": success, "model_id": model_id})
+
+
+@app.get("/api/models/progress")
+@app.get("/models/progress")
+async def get_model_progress(model_id: str):
+    progress = ModelManager.get_download_progress(model_id)
+    return JSONResponse(progress)
+
+
 @app.get("/api/models/download")
 @app.get("/models/download")
 async def download_model_sse(model_id: str):

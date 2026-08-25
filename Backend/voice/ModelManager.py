@@ -74,6 +74,53 @@ def set_active_model_id(model_id: str) -> bool:
         return False
 
 
+def get_download_progress(model_id: str) -> dict:
+    """Get real-time download progress dictionary for a model."""
+    with _active_download_lock:
+        if model_id in _current_downloads:
+            return dict(_current_downloads[model_id])
+
+    # If not currently in active downloads map, check if it's already installed
+    installed = get_installed_models()
+    if model_id in installed:
+        return {
+            "model_id": model_id,
+            "progress": 100.0,
+            "status": "completed",
+        }
+
+    return {
+        "model_id": model_id,
+        "progress": 0.0,
+        "status": "idle",
+    }
+
+
+def start_download_background(model_id: str) -> bool:
+    """Start background download thread if not already running."""
+    with _active_download_lock:
+        cur = _current_downloads.get(model_id, {})
+        if cur.get("status") in ["downloading", "starting", "connecting"]:
+            return True
+        _current_downloads[model_id] = {
+            "model_id": model_id,
+            "progress": 1.0,
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "status": "Connecting to Hugging Face...",
+        }
+
+    def _worker():
+        try:
+            download_model_stream(model_id, lambda p: None)
+        except Exception as e:
+            print(f"[ModelManager] Background download error for {model_id}: {e}", flush=True)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return True
+
+
 def get_installed_models() -> List[str]:
     """Scan local HuggingFace cache directory to detect installed models."""
     installed = set()
