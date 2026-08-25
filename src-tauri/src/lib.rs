@@ -1,11 +1,15 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use arboard::Clipboard;
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use arboard::Clipboard;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 
@@ -185,24 +189,32 @@ fn redo_document(state: tauri::State<'_, KvieState>) -> Result<DocumentSnapshot,
 
 #[tauri::command]
 fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
-    let mut enigo = Enigo::new(&Settings::default()).map_err(|error| format!("keyboard unavailable: {error}"))?;
-    if erase_count > 0 {
-        for _ in 0..erase_count {
-            let _ = enigo.key(Key::Backspace, Direction::Click);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|error| format!("keyboard unavailable: {error}"))?;
+        if erase_count > 0 {
+            for _ in 0..erase_count {
+                let _ = enigo.key(Key::Backspace, Direction::Click);
+            }
         }
-    }
-    if !text.is_empty() {
-        if text.len() <= 20 && !text.contains('\n') {
-            let _ = enigo.text(&text);
-        } else {
-            let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
-            clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
-            enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
-            enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
-            enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
+        if !text.is_empty() {
+            if text.len() <= 20 && !text.contains('\n') {
+                let _ = enigo.text(&text);
+            } else {
+                let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
+                clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
+                enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
+                enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
+                enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
+            }
         }
+        return Ok(());
     }
-    Ok(())
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (erase_count, text);
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -520,6 +532,7 @@ fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn setup_system_tray(app: &mut tauri::App) -> Result<(), String> {
     let open_i = MenuItem::with_id(app, "open", "Open KVIE Workspace", true, None::<&str>).map_err(|e| e.to_string())?;
     let floating_i = MenuItem::with_id(app, "toggle_floating", "Toggle Floating Mic", true, None::<&str>).map_err(|e| e.to_string())?;
@@ -703,6 +716,7 @@ pub fn run() {
             let document = load_document(&db_path)?;
             app.manage(KvieState { document: Mutex::new(document), db_path });
             start_global_hotkey_listener(app.handle().clone());
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             setup_system_tray(app)?;
             Ok(())
         })

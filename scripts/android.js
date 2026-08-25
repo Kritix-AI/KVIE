@@ -64,6 +64,12 @@ if (env.ANDROID_HOME) {
   extraPaths.push(path.join(env.ANDROID_HOME, 'platform-tools'))
   extraPaths.push(path.join(env.ANDROID_HOME, 'cmdline-tools', 'latest', 'bin'))
 }
+if (env.NDK_HOME) {
+  const llvmBin = path.join(env.NDK_HOME, 'toolchains', 'llvm', 'prebuilt', 'windows-x86_64', 'bin')
+  if (fs.existsSync(llvmBin)) {
+    extraPaths.push(llvmBin)
+  }
+}
 extraPaths.push(nodeDir)
 extraPaths.push(path.join(process.cwd(), 'node_modules', '.bin'))
 
