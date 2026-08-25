@@ -1,8 +1,9 @@
-import { spawn } from 'child_process'
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
+import { createRequire } from 'module'
 
+const require = createRequire(import.meta.url)
 const isWindows = process.platform === 'win32'
 const env = { ...process.env }
 
@@ -51,25 +52,44 @@ if ((!env.NDK_HOME || !fs.existsSync(env.NDK_HOME)) && env.ANDROID_HOME) {
   }
 }
 
-// 4. Prepend Java binary to PATH
+// 4. Safely augment System PATH on all platforms
+const pathKeys = Object.keys(process.env).filter(k => k.toLowerCase() === 'path')
+const nodeDir = path.dirname(process.execPath)
+const extraPaths = []
+
 if (env.JAVA_HOME) {
-  env.PATH = `${path.join(env.JAVA_HOME, 'bin')}${isWindows ? ';' : ':'}${env.PATH || ''}`
+  extraPaths.push(path.join(env.JAVA_HOME, 'bin'))
+}
+if (env.ANDROID_HOME) {
+  extraPaths.push(path.join(env.ANDROID_HOME, 'platform-tools'))
+  extraPaths.push(path.join(env.ANDROID_HOME, 'cmdline-tools', 'latest', 'bin'))
+}
+extraPaths.push(nodeDir)
+extraPaths.push(path.join(process.cwd(), 'node_modules', '.bin'))
+
+const sep = isWindows ? ';' : ':'
+for (const key of (pathKeys.length > 0 ? pathKeys : ['PATH', 'Path'])) {
+  const existing = process.env[key] || ''
+  env[key] = `${extraPaths.join(sep)}${sep}${existing}`
+}
+
+// In-process environment application
+for (const [k, v] of Object.entries(env)) {
+  process.env[k] = v
 }
 
 const args = process.argv.slice(2)
-const npmCmd = isWindows ? 'npm.cmd' : 'npm'
+console.log(`[KVIE Android Engine] JAVA_HOME: ${process.env.JAVA_HOME}`)
+console.log(`[KVIE Android Engine] ANDROID_HOME: ${process.env.ANDROID_HOME}`)
+console.log(`[KVIE Android Engine] NDK_HOME: ${process.env.NDK_HOME}`)
+console.log(`[KVIE Android Engine] Executing Tauri Android: ${args.join(' ')}\n`)
 
-console.log(`[KVIE Android Engine] JAVA_HOME: ${env.JAVA_HOME}`)
-console.log(`[KVIE Android Engine] ANDROID_HOME: ${env.ANDROID_HOME}`)
-console.log(`[KVIE Android Engine] NDK_HOME: ${env.NDK_HOME}`)
-console.log(`[KVIE Android Engine] Executing: tauri android ${args.join(' ')}\n`)
+const { run, logError } = require('@tauri-apps/cli/main.js')
 
-const child = spawn(npmCmd, ['run', 'tauri', '--', 'android', ...args], {
-  env,
-  stdio: 'inherit',
-  shell: true,
-})
-
-child.on('exit', code => {
-  process.exit(code || 0)
-})
+try {
+  await run(['android', ...args], 'tauri')
+} catch (err) {
+  if (logError) logError(err)
+  else console.error(err)
+  process.exit(1)
+}
