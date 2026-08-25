@@ -219,7 +219,15 @@ fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
 
 #[tauri::command]
 fn start_window_drag(window: tauri::Window) -> Result<(), String> {
-    window.start_dragging().map_err(|e| e.to_string())
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        window.start_dragging().map_err(|e| e.to_string())
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = window;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -252,9 +260,10 @@ fn toggle_floating_mic(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
+fn inspect_window_app(_hwnd: isize) -> Option<ActiveAppInfo> {
     #[cfg(target_os = "windows")]
     {
+        let hwnd = _hwnd;
         use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
         use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
         use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_QUERY_INFORMATION};
@@ -615,6 +624,7 @@ fn get_project_root() -> PathBuf {
 }
 
 fn start_python_service() {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     std::thread::spawn(|| {
         if let Ok(stream) = std::net::TcpStream::connect("127.0.0.1:8765") {
             drop(stream);
