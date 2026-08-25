@@ -150,7 +150,6 @@ def get_installed_models() -> List[str]:
     except Exception:
         pass
 
-    installed.add("large-v3-turbo")
     return sorted(list(installed))
 
 

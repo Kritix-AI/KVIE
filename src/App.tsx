@@ -180,7 +180,7 @@ const App = () => {
 
   const [downloadedModels, setDownloadedModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('kvie_downloaded_stt_models')
-    return saved ? JSON.parse(saved) : ['large-v3-turbo']
+    return saved ? JSON.parse(saved) : []
   })
 
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { pct: number; downloadedMB: number; totalMB: number; status: string }>>({})
@@ -189,10 +189,9 @@ const App = () => {
   const refreshInstalledModels = async () => {
     const res = await fetchModelsStatus()
     if (res) {
-      if (res.installed && res.installed.length > 0) {
-        setDownloadedModels(old => [...new Set([...old, ...res.installed])])
-        localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify([...new Set(res.installed)]))
-      }
+      const installed = res.installed || []
+      setDownloadedModels(installed)
+      localStorage.setItem('kvie_downloaded_stt_models', JSON.stringify(installed))
       if (res.active) {
         setActiveModelId(res.active)
         localStorage.setItem('kvie_active_stt_model', res.active)
