@@ -10,7 +10,7 @@ export interface ModelProgressPayload {
   progress: number // 0 to 100
   downloaded_bytes?: number
   total_bytes?: number
-  status: 'starting' | 'connecting' | 'downloading' | 'completed' | 'error'
+  status: 'starting' | 'connecting' | 'downloading' | 'completed' | 'error' | string
   speed?: string
   error?: string
 }
@@ -58,8 +58,8 @@ export function downloadModelWithProgress(
   onError: (err: string) => void
 ): () => void {
   let isCancelled = false
-  let unlistenFn: (() => void) | null = null
   let isFinished = false
+  let unlistenFn: (() => void) | null = null
 
   const handlePayload = (payload: ModelProgressPayload) => {
     if (isCancelled || isFinished) return
@@ -76,37 +76,67 @@ export function downloadModelWithProgress(
     }
   }
 
-  // 1. Setup EventSource stream (high-throughput SSE connection)
-  let eventSource: EventSource | null = null
-  try {
-    eventSource = new EventSource(`${SERVICE_BASE_URL}/api/models/download?model_id=${encodeURIComponent(modelId)}`)
+  const abortController = new AbortController()
 
-    eventSource.onmessage = event => {
-      try {
-        const data: ModelProgressPayload = JSON.parse(event.data)
-        handlePayload(data)
-        if (isFinished) {
-          eventSource?.close()
+  // 1. Primary: Direct Fetch Stream with ReadableStream reader
+  const startFetchStream = async () => {
+    try {
+      const res = await fetch(
+        `${SERVICE_BASE_URL}/api/models/download?model_id=${encodeURIComponent(modelId)}`,
+        { signal: abortController.signal }
+      )
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+      }
+
+      if (!res.body) {
+        throw new Error('No streaming response body available')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+
+      while (!isCancelled && !isFinished) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (trimmed.startsWith('data:')) {
+            try {
+              const data: ModelProgressPayload = JSON.parse(trimmed.slice(5).trim())
+              handlePayload(data)
+            } catch {
+              // ignore parse errors
+            }
+          }
         }
-      } catch {
-        // parse error
       }
-    }
 
-    eventSource.onerror = () => {
-      eventSource?.close()
-      // If SSE stream closed before finishing, try native invoke
       if (!isFinished && !isCancelled) {
-        void invoke('download_model_native', { model_id: modelId, modelId }).catch(err => {
-          onError(String(err))
-        })
+        isFinished = true
+        onComplete()
+      }
+    } catch (err: any) {
+      if (isCancelled || isFinished) return
+      // If fetch fails, try native Tauri invoke fallback
+      try {
+        await invoke('download_model_native', { model_id: modelId, modelId })
+      } catch (nativeErr) {
+        onError(err?.message || String(nativeErr))
       }
     }
-  } catch {
-    // SSE fallback
   }
 
-  // 2. Listen to native Tauri events
+  void startFetchStream()
+
+  // 2. Secondary: Listen to native Tauri events
   try {
     void listen<string>('model-download-progress', event => {
       try {
@@ -124,7 +154,7 @@ export function downloadModelWithProgress(
 
   return () => {
     isCancelled = true
+    abortController.abort()
     if (unlistenFn) unlistenFn()
-    if (eventSource) eventSource.close()
   }
 }
