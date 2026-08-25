@@ -57,14 +57,14 @@ if (env.JAVA_HOME) {
 }
 
 const args = process.argv.slice(2)
-const tauriBin = isWindows ? 'npx.cmd' : 'npx'
+const npmCmd = isWindows ? 'npm.cmd' : 'npm'
 
 console.log(`[KVIE Android Engine] JAVA_HOME: ${env.JAVA_HOME}`)
 console.log(`[KVIE Android Engine] ANDROID_HOME: ${env.ANDROID_HOME}`)
 console.log(`[KVIE Android Engine] NDK_HOME: ${env.NDK_HOME}`)
 console.log(`[KVIE Android Engine] Executing: tauri android ${args.join(' ')}\n`)
 
-const child = spawn(tauriBin, ['tauri', 'android', ...args], {
+const child = spawn(npmCmd, ['run', 'tauri', '--', 'android', ...args], {
   env,
   stdio: 'inherit',
   shell: true,
