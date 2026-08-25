@@ -578,6 +578,29 @@ fn setup_system_tray(app: &mut tauri::App) -> Result<(), String> {
     Ok(())
 }
 
+fn get_project_root() -> PathBuf {
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("Backend").exists() {
+            return cwd;
+        }
+        if let Some(parent) = cwd.parent() {
+            if parent.join("Backend").exists() {
+                return parent.to_path_buf();
+            }
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let mut current = exe.as_path();
+        while let Some(parent) = current.parent() {
+            if parent.join("Backend").exists() {
+                return parent.to_path_buf();
+            }
+            current = parent;
+        }
+    }
+    PathBuf::from(".")
+}
+
 fn start_python_service() {
     std::thread::spawn(|| {
         if let Ok(stream) = std::net::TcpStream::connect("127.0.0.1:8765") {
@@ -585,11 +608,15 @@ fn start_python_service() {
             return;
         }
 
+        let root = get_project_root();
+
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             let mut cmd = std::process::Command::new("python");
             cmd.args(&["-m", "Backend.kvie.service"]);
+            cmd.current_dir(&root);
+            cmd.env("PYTHONPATH", &root);
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             let _ = cmd.spawn();
         }
@@ -598,6 +625,8 @@ fn start_python_service() {
         {
             let mut cmd = std::process::Command::new("python3");
             cmd.args(&["-m", "Backend.kvie.service"]);
+            cmd.current_dir(&root);
+            cmd.env("PYTHONPATH", &root);
             let _ = cmd.spawn();
         }
     });
@@ -606,8 +635,20 @@ fn start_python_service() {
 #[tauri::command]
 fn download_model_native(app_handle: tauri::AppHandle, model_id: String) -> Result<(), String> {
     std::thread::spawn(move || {
+        let root = get_project_root();
+        let root_str = root.to_string_lossy().replace('\\', "/");
+
         let script = format!(
-            r#"import json, sys
+            r#"import sys, os, json
+root = "{}"
+if root and root not in sys.path:
+    sys.path.insert(0, root)
+try:
+    if os.path.exists(root):
+        os.chdir(root)
+except Exception:
+    pass
+
 from Backend.voice import ModelManager
 
 def on_progress(p):
@@ -615,6 +656,7 @@ def on_progress(p):
 
 ModelManager.download_model_stream("{}", on_progress)
 "#,
+            root_str,
             model_id
         );
 
@@ -623,6 +665,8 @@ ModelManager.download_model_stream("{}", on_progress)
 
         let mut cmd = std::process::Command::new("python");
         cmd.args(&["-u", "-c", &script]);
+        cmd.current_dir(&root);
+        cmd.env("PYTHONPATH", &root);
         cmd.env("PYTHONUNBUFFERED", "1");
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
