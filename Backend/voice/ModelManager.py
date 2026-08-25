@@ -116,54 +116,114 @@ def download_model_stream(
     progress_callback: Callable[[dict], None],
 ) -> bool:
     """Download model weights with real-time byte & percentage progress callback."""
+    import time
     repo_id = MODEL_REPO_MAP.get(model_id, f"Systran/faster-whisper-{model_id}")
 
     with _active_download_lock:
         _current_downloads[model_id] = {"progress": 0, "status": "starting"}
 
     try:
-        from huggingface_hub import snapshot_download
-        from tqdm.auto import tqdm
-
-        class CallbackTqdm(tqdm):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self._tot = kwargs.get("total", 0) or 1
-                self._cur = 0
-
-            def update(self, n=1):
-                super().update(n)
-                self._cur += n
-                pct = min(100.0, max(0.0, (self._cur / self._tot) * 100))
-                payload = {
-                    "model_id": model_id,
-                    "progress": round(pct, 1),
-                    "downloaded_bytes": self._cur,
-                    "total_bytes": self._tot,
-                    "status": "downloading",
-                }
-                _current_downloads[model_id] = payload
-                try:
-                    progress_callback(payload)
-                except Exception:
-                    pass
+        import requests
+        from huggingface_hub import HfApi
 
         progress_callback({
             "model_id": model_id,
-            "progress": 2.0,
+            "progress": 1.0,
             "downloaded_bytes": 0,
             "total_bytes": 0,
-            "status": "connecting",
+            "status": "Connecting to Hugging Face...",
         })
 
-        snapshot_download(
-            repo_id=repo_id,
-            tqdm_class=CallbackTqdm,
-        )
+        api = HfApi()
+        repo_items = list(api.list_repo_tree(repo_id))
+        files = [f for f in repo_items if hasattr(f, "size") and f.size is not None and not f.path.startswith(".git")]
+        total_repo_bytes = sum(f.size for f in files) or 1
+
+        org_repo = repo_id.replace("/", "--")
+        cache_hub = os.path.expanduser("~/.cache/huggingface/hub")
+        target_dir = os.path.join(cache_hub, f"models--{org_repo}", "snapshots", "main")
+        os.makedirs(target_dir, exist_ok=True)
+
+        downloaded_bytes = 0
+        start_time = time.time()
+        last_emit_time = start_time
+
+        for item in files:
+            file_path = item.path
+            file_size = item.size
+            dest_file = os.path.join(target_dir, file_path)
+            os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+
+            # Skip if already downloaded and size matches
+            if os.path.exists(dest_file) and os.path.getsize(dest_file) == file_size:
+                downloaded_bytes += file_size
+                continue
+
+            url = f"https://huggingface.co/{repo_id}/resolve/main/{file_path}"
+            headers = {"User-Agent": "KVIE-Model-Downloader/1.0"}
+
+            try:
+                res = requests.get(url, headers=headers, stream=True, allow_redirects=True, timeout=60)
+            except Exception:
+                res = None
+
+            if not res or res.status_code != 200:
+                try:
+                    from huggingface_hub import hf_hub_download
+                    hf_hub_download(repo_id=repo_id, filename=file_path)
+                    downloaded_bytes += file_size
+                except Exception:
+                    pass
+                continue
+
+            part_file = dest_file + ".part"
+            with open(part_file, "wb") as f_out:
+                for chunk in res.iter_content(chunk_size=1024 * 512):
+                    if not chunk:
+                        continue
+                    f_out.write(chunk)
+                    downloaded_bytes += len(chunk)
+
+                    now = time.time()
+                    if now - last_emit_time > 0.15:  # Emit every 150ms
+                        last_emit_time = now
+                        elapsed = max(now - start_time, 0.001)
+                        speed_mb = (downloaded_bytes / (1024 * 1024)) / elapsed
+                        pct = min(99.9, round((downloaded_bytes / total_repo_bytes) * 100, 1))
+                        d_mb = downloaded_bytes / (1024 * 1024)
+                        t_mb = total_repo_bytes / (1024 * 1024)
+
+                        payload = {
+                            "model_id": model_id,
+                            "progress": pct,
+                            "downloaded_bytes": downloaded_bytes,
+                            "total_bytes": total_repo_bytes,
+                            "status": f"Downloading {pct}% ({d_mb:.1f} MB / {t_mb:.1f} MB)",
+                            "speed": f"{speed_mb:.1f} MB/s",
+                        }
+                        _current_downloads[model_id] = payload
+                        try:
+                            progress_callback(payload)
+                        except Exception:
+                            pass
+
+            if os.path.exists(dest_file):
+                try:
+                    os.remove(dest_file)
+                except Exception:
+                    pass
+            os.replace(part_file, dest_file)
+
+        refs_dir = os.path.join(cache_hub, f"models--{org_repo}", "refs")
+        os.makedirs(refs_dir, exist_ok=True)
+        with open(os.path.join(refs_dir, "main"), "w", encoding="utf-8") as f_ref:
+            f_ref.write("main\n")
 
         final_payload = {
             "model_id": model_id,
             "progress": 100.0,
+            "downloaded_bytes": total_repo_bytes,
+            "total_bytes": total_repo_bytes,
             "status": "completed",
         }
         _current_downloads[model_id] = final_payload

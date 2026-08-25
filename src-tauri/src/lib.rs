@@ -622,7 +622,8 @@ ModelManager.download_model_stream("{}", on_progress)
         use std::os::windows::process::CommandExt;
 
         let mut cmd = std::process::Command::new("python");
-        cmd.args(&["-c", &script]);
+        cmd.args(&["-u", "-c", &script]);
+        cmd.env("PYTHONUNBUFFERED", "1");
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         #[cfg(target_os = "windows")]
