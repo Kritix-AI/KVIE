@@ -17,6 +17,10 @@ _ROOT = os.path.dirname(_BACKEND_DIR)
 
 MODEL_REPO_MAP = {
     "large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "trelis-hinglish": "Trelis/whisper-hinglish-preview",
+    "srota-qwen3": "moorlee/qwen3-asr-0.6b-hinglish",
+    "shunya-zero-stt": "shunyalabs/zero-stt-hinglish",
+    "indic-conformer-600m": "ai4bharat/indic-conformer-600m-multilingual",
     "indicwhisper": "Systran/faster-whisper-small",
     "medium": "Systran/faster-whisper-medium",
     "small": "Systran/faster-whisper-small",
@@ -88,30 +92,23 @@ def get_installed_models() -> List[str]:
 
     except Exception as e:
         print(f"[ModelManager] Cache scan notice: {e}", flush=True)
-        # Fallback to checking ~/.cache/huggingface/hub directory directly
         hub_path = os.path.expanduser("~/.cache/huggingface/hub")
         if os.path.exists(hub_path):
             try:
                 dirs = os.listdir(hub_path)
                 for d in dirs:
-                    d_lower = d.lower()
-                    if "large-v3-turbo" in d_lower and "large-v3-turbo" not in installed:
-                        installed.append("large-v3-turbo")
-                    if "base" in d_lower and "base" not in installed:
-                        installed.append("base")
-                    if "small" in d_lower and "small" not in installed:
-                        installed.append("small")
-                    if "tiny" in d_lower and "tiny" not in installed:
-                        installed.append("tiny")
-                    if "medium" in d_lower and "medium" not in installed:
-                        installed.append("medium")
+                    d_clean = d.lower().replace("models--", "").replace("--", "/")
+                    for model_id, repo_id in MODEL_REPO_MAP.items():
+                        if model_id not in installed:
+                            if repo_id.lower() in d_clean or model_id in d_clean:
+                                installed.append(model_id)
             except Exception:
                 pass
 
     if "large-v3-turbo" not in installed:
         installed.append("large-v3-turbo")
 
-    return installed
+    return list(dict.fromkeys(installed))
 
 
 def download_model_stream(
