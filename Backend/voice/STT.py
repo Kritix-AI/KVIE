@@ -85,7 +85,10 @@ def get_model(config: Optional[STTConfig] = None):
         env = dotenv_values(os.path.join(_ROOT, ".env"))
         compute_type = env.get("WhisperComputeType") or ("float16" if cfg.device == "cuda" else "int8")
         
-        target_model = cfg.model_name
+        from Backend.voice.ModelManager import MODEL_REPO_MAP
+        raw_name = cfg.model_name
+        target_model = MODEL_REPO_MAP.get(raw_name, raw_name)
+
         try:
             _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
         except Exception:
@@ -93,7 +96,7 @@ def get_model(config: Optional[STTConfig] = None):
                 target_model = "deepdml/faster-whisper-large-v3-turbo-ct2"
                 _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
             else:
-                raise
+                _asr_model = WhisperModel(raw_name, device=cfg.device, compute_type=compute_type)
 
         _asr_engine_type = "faster_whisper"
         print(f"[STT] Loaded faster-whisper CTranslate2 model ({target_model}, compute_type={compute_type})", flush=True)

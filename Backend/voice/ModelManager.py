@@ -75,40 +75,36 @@ def set_active_model_id(model_id: str) -> bool:
 
 
 def get_installed_models() -> List[str]:
-    """Scan local HuggingFace cache to detect installed models."""
-    installed = []
+    """Scan local HuggingFace cache directory to detect installed models."""
+    installed = set()
+
+    # 1. Direct directory scan on local disk (fast & always accurate)
+    hub_path = os.path.expanduser("~/.cache/huggingface/hub")
+    if os.path.exists(hub_path):
+        try:
+            dirs = [d.lower() for d in os.listdir(hub_path)]
+            for model_id, repo_id in MODEL_REPO_MAP.items():
+                expected_dir = "models--" + repo_id.lower().replace("/", "--")
+                if expected_dir in dirs:
+                    installed.add(model_id)
+                elif any(model_id.lower() in d for d in dirs):
+                    installed.add(model_id)
+        except Exception:
+            pass
+
+    # 2. Also check scan_cache_dir()
     try:
         from huggingface_hub import scan_cache_dir
         cache_info = scan_cache_dir()
         cached_repos = {repo.repo_id.lower() for repo in cache_info.repos}
-
         for model_id, repo_id in MODEL_REPO_MAP.items():
             if repo_id.lower() in cached_repos:
-                installed.append(model_id)
+                installed.add(model_id)
+    except Exception:
+        pass
 
-        # Ensure default model is considered installed if already cached under alternative name
-        if any("faster-whisper-large-v3-turbo" in r for r in cached_repos) and "large-v3-turbo" not in installed:
-            installed.append("large-v3-turbo")
-
-    except Exception as e:
-        print(f"[ModelManager] Cache scan notice: {e}", flush=True)
-        hub_path = os.path.expanduser("~/.cache/huggingface/hub")
-        if os.path.exists(hub_path):
-            try:
-                dirs = os.listdir(hub_path)
-                for d in dirs:
-                    d_clean = d.lower().replace("models--", "").replace("--", "/")
-                    for model_id, repo_id in MODEL_REPO_MAP.items():
-                        if model_id not in installed:
-                            if repo_id.lower() in d_clean or model_id in d_clean:
-                                installed.append(model_id)
-            except Exception:
-                pass
-
-    if "large-v3-turbo" not in installed:
-        installed.append("large-v3-turbo")
-
-    return list(dict.fromkeys(installed))
+    installed.add("large-v3-turbo")
+    return sorted(list(installed))
 
 
 def download_model_stream(
