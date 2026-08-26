@@ -929,7 +929,7 @@ export function App() {
                     whileHover={{ scale: 1.04 }}
                     onClick={speech.isListening ? speech.stopListening : speech.startListening}
                     disabled={!speech.isSupported}
-                    className={`relative z-10 grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-full border transition-all duration-300 ${
+                    className={`relative z-10 grid h-[76px] w-[76px] sm:h-22 sm:w-22 place-items-center rounded-full border transition-all duration-300 ${
                       speech.isListening
                         ? 'text-white shadow-2xl'
                         : 'border-white/10 bg-zinc-900/90 text-zinc-300 shadow-lg shadow-black/50 backdrop-blur-md hover:border-zinc-700 hover:bg-zinc-800/90'
@@ -939,16 +939,16 @@ export function App() {
                         ? {
                             backgroundColor: theme.accentColor,
                             borderColor: theme.accentColor,
-                            boxShadow: `0 0 40px ${theme.accentColor}80`,
+                            boxShadow: `0 0 45px ${theme.accentColor}90`,
                           }
                         : {}
                     }
                     aria-label={speech.isListening ? 'Stop listening' : 'Start listening'}
                   >
                     {speech.isListening ? (
-                      <Square className="h-6 w-6 sm:h-7 sm:w-7 fill-current" />
+                      <Square className="h-7 w-7 sm:h-8 sm:w-8 fill-current" />
                     ) : (
-                      <Mic className="h-7 w-7 sm:h-8 sm:w-8" style={{ color: theme.accentColor }} />
+                      <Mic className="h-8 w-8 sm:h-9 sm:w-9" style={{ color: theme.accentColor }} />
                     )}
                   </motion.button>
                 </div>
