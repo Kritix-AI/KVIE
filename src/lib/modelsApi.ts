@@ -20,11 +20,20 @@ export interface ModelsStatusResponse {
   active: string
 }
 
-const SERVICE_BASE_URL = 'http://127.0.0.1:8765'
+export const getServiceBaseUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    const isAndroid = /android/i.test(navigator.userAgent)
+    if (isAndroid) {
+      // In Android emulator, 10.0.2.2 points to host PC
+      return 'http://10.0.2.2:8765'
+    }
+  }
+  return 'http://127.0.0.1:8765'
+}
 
 export async function fetchModelsStatus(): Promise<ModelsStatusResponse | null> {
   try {
-    const res = await fetch(`${SERVICE_BASE_URL}/api/models`, { method: 'GET' })
+    const res = await fetch(`${getServiceBaseUrl()}/api/models`, { method: 'GET' })
     if (res.ok) {
       return await res.json()
     }
@@ -36,7 +45,7 @@ export async function fetchModelsStatus(): Promise<ModelsStatusResponse | null> 
 
 export async function selectActiveModel(modelId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${SERVICE_BASE_URL}/api/models/select`, {
+    const res = await fetch(`${getServiceBaseUrl()}/api/models/select`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_id: modelId }),
@@ -82,56 +91,55 @@ export function downloadModelWithProgress(
   // 1. Trigger background download on backend
   const startDownload = async () => {
     try {
-      await fetch(`${SERVICE_BASE_URL}/api/models/download/start?model_id=${encodeURIComponent(modelId)}`, {
+      await fetch(`${getServiceBaseUrl()}/api/models/download/start?model_id=${encodeURIComponent(modelId)}`, {
         method: 'POST',
       })
     } catch {
-      // If REST start fails, try native Tauri invoke
+      // Backend python might not be running on mobile; try native Rust download
       try {
-        await invoke('download_model_native', { model_id: modelId, modelId })
-      } catch {
-        // Fallback
+        await invoke('download_model_native', { modelId })
+      } catch (err: any) {
+        console.warn('Native download invoke:', err)
       }
     }
-
-    // 2. Poll in-memory progress every 150ms (ultra-fast, zero-buffering)
-    if (pollTimer) clearInterval(pollTimer)
-    pollTimer = setInterval(async () => {
-      if (isCancelled || isFinished) {
-        clearInterval(pollTimer)
-        return
-      }
-
-      try {
-        const res = await fetch(`${SERVICE_BASE_URL}/api/models/progress?model_id=${encodeURIComponent(modelId)}`)
-        if (res.ok) {
-          const payload: ModelProgressPayload = await res.json()
-          handlePayload(payload)
-        }
-      } catch {
-        // Service temporarily busy
-      }
-    }, 150)
   }
 
-  void startDownload()
+  // 2. Listen to Tauri Native Events (Rust emits model-download-progress)
+  listen<string>('model-download-progress', (event) => {
+    try {
+      const data = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload
+      handlePayload(data)
+    } catch {}
+  }).then((unsub) => {
+    if (isCancelled || isFinished) {
+      unsub()
+    } else {
+      unlistenFn = unsub
+    }
+  }).catch(() => {})
 
-  // 3. Also listen to native Tauri events as secondary channel
-  try {
-    void listen<string>('model-download-progress', event => {
-      try {
-        const payload: ModelProgressPayload = JSON.parse(event.payload)
+  // 3. Fallback: Fast polling against python backend
+  pollTimer = setInterval(async () => {
+    if (isCancelled || isFinished) {
+      if (pollTimer) clearInterval(pollTimer)
+      return
+    }
+
+    try {
+      const res = await fetch(`${getServiceBaseUrl()}/api/models/progress?model_id=${encodeURIComponent(modelId)}`)
+      if (res.ok) {
+        const payload: ModelProgressPayload = await res.json()
         handlePayload(payload)
-      } catch {
-        // parsing
       }
-    }).then(fn => {
-      unlistenFn = fn
-    })
-  } catch {
-    // browser mode
-  }
+    } catch {
+      // Offline / connecting
+    }
+  }, 1000)
 
+  // Trigger start
+  startDownload()
+
+  // Return cancel function
   return () => {
     isCancelled = true
     if (pollTimer) clearInterval(pollTimer)
