@@ -6,8 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
+import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -107,10 +110,16 @@ class KVIEInputMethodService : InputMethodService() {
         keyComma = view.findViewById(R.id.keyComma)
         keyEnter = view.findViewById(R.id.keyEnter)
 
-        // 1. Setup Voice Dictation Mic Button
+        // 1. Setup Voice Dictation Mic Button (Tap: Voice Dictation | Hold: Detach to Floating Screen Bubble)
         micButton.setOnClickListener {
             performKeyHaptic()
             if (isListening) stopListening() else startListening()
+        }
+
+        micButton.setOnLongClickListener {
+            performKeyHaptic()
+            launchFloatingMicOverlay()
+            true
         }
 
         // 2. Setup SmolLM2 AI Polish Button
@@ -417,6 +426,24 @@ class KVIEInputMethodService : InputMethodService() {
                 statusText.text = "Polish ready"
             }
         }
+    }
+
+    private fun launchFloatingMicOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            statusText.text = "Grant 'Draw over apps' to float mic"
+            return
+        }
+
+        val serviceIntent = Intent(this, FloatingMicService::class.java)
+        startService(serviceIntent)
+        requestHideSelf(0)
     }
 
     private fun getActiveEngineId(): String {
