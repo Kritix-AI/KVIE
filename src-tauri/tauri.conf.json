@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Kritix",
+  "productName": "KVIE",
   "version": "0.1.6",
   "identifier": "ai.kritix.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Kritix — Voice workspace",
+        "title": "KVIE — Voice Workspace",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
@@ -21,7 +21,7 @@
       },
       {
         "label": "floating_mic",
-        "title": "Kritix Floating Mic",
+        "title": "KVIE Floating Mic",
         "url": "index.html?window=floating",
         "width": 660,
         "height": 80,
