@@ -1,8 +1,10 @@
 package ai.kritix.kviekeyboard
 
 import ai.kritix.desktop.R
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -11,6 +13,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,6 +68,11 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun startListening() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            statusText.text = "Mic permission needed (open KVIE app)"
+            return
+        }
+
         val activeEngine = getActiveEngineId()
 
         if (activeEngine.startsWith("whisper-cpp")) {
@@ -97,13 +105,20 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun startSystemSpeechRecognizer() {
-        if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        }
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            putExtra("android.speech.extra.DICTATION_MODE", true)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -119,7 +134,19 @@ class KVIEInputMethodService : InputMethodService() {
             }
 
             override fun onError(error: Int) {
-                statusText.text = "Tap the mic and speak"
+                val errorMsg = when (error) {
+                    SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+                    SpeechRecognizer.ERROR_CLIENT -> "Client error (tap again)"
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission required"
+                    SpeechRecognizer.ERROR_NETWORK -> "Network required for speech"
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Busy — please tap mic again"
+                    SpeechRecognizer.ERROR_SERVER -> "Speech server error"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
+                    else -> "Speech recognition error ($error)"
+                }
+                statusText.text = errorMsg
                 stopListening()
             }
 
@@ -131,24 +158,33 @@ class KVIEInputMethodService : InputMethodService() {
                 }
             }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                statusText.text = "Listening..."
+            }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {
-                statusText.text = "Refining text..."
+                statusText.text = "Processing speech..."
             }
             override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
         })
 
-        speechRecognizer?.startListening(intent)
-        isListening = true
-        micButton.isSelected = true
+        try {
+            speechRecognizer?.startListening(intent)
+            isListening = true
+            micButton.isSelected = true
+        } catch (e: Exception) {
+            statusText.text = "Speech service error: ${e.message}"
+            stopListening()
+        }
     }
 
     private fun stopListening() {
         engineJob?.cancel()
         whisperEngine?.stopRecording()
-        speechRecognizer?.stopListening()
+        try {
+            speechRecognizer?.stopListening()
+        } catch (_: Exception) {}
         isListening = false
         micButton.isSelected = false
     }

@@ -79,6 +79,15 @@ class MainActivity : TauriActivity() {
     if (root is WebView) {
       try {
         root.settings.javaScriptEnabled = true
+        root.settings.domStorageEnabled = true
+        root.settings.mediaPlaybackRequiresUserGesture = false
+        root.webChromeClient = object : android.webkit.WebChromeClient() {
+          override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+            runOnUiThread {
+              request?.grant(request.resources)
+            }
+          }
+        }
         root.addJavascriptInterface(AndroidBridge(this), "AndroidKeyboardBridge")
         return true
       } catch (_: Exception) {
