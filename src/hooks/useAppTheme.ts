@@ -8,7 +8,7 @@ export interface ThemePreset {
 }
 
 export const THEME_PRESETS: ThemePreset[] = [
-  { id: 'cyan', name: 'Current (KVIE Cyan)', color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.4)' },
+  { id: 'cyan', name: 'Cyan (KVIE Blue)', color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.4)' },
   { id: 'green', name: 'Green (Default Lime)', color: '#c7f36b', glow: 'rgba(199, 243, 107, 0.4)' },
   { id: 'pink', name: 'Pink (Neon Pink)', color: '#ec4899', glow: 'rgba(236, 72, 153, 0.4)' },
   { id: 'red', name: 'Red (Crimson Red)', color: '#ef4444', glow: 'rgba(239, 68, 68, 0.4)' },

@@ -105,7 +105,11 @@ class SmolLMEngine(private val context: Context) {
             }
             result = sentences.joinToString(" ")
 
-            // 6. Route through Multi-Tier Grammar Router Pipeline (Token, Sentence, Paragraph Engine)
+            // 6. Universal brand auto-correction (critics/kritics/etc. -> Kritix)
+            result = result.replace(Regex("(?i)\\b(critics|critic|kritics|kritik|kritiks|kritic|critis|kritcs)\\b"), "Kritix")
+            result = result.replace(Regex("(?i)\\b(kvie)\\b"), "KVIE")
+
+            // 7. Route through Multi-Tier Grammar Router Pipeline (Token, Sentence, Paragraph Engine)
             val routed = if (enableGrammarRouter) GrammarRouter.route(result, true) else result.trim()
 
             return routed.trim()

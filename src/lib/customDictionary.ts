@@ -10,7 +10,7 @@ export interface CustomWord {
 }
 
 export const DEFAULT_CUSTOM_WORDS: CustomWord[] = [
-  { id: '1', word: 'Kritix', phoneticVariants: ['critics', 'kritiks', 'critic'], enabled: true },
+  { id: '1', word: 'Kritix', phoneticVariants: ['critics', 'critic', 'kritiks', 'kritik', 'kritcs', 'kritic', 'critis'], enabled: true },
   { id: '2', word: 'Tauri', phoneticVariants: ['towel', 'tori', 'taury'], enabled: true },
   { id: '3', word: 'Hinglish', phoneticVariants: ['hinglesh'], enabled: true },
   { id: '4', word: 'Qwen', phoneticVariants: ['q-wen', 'quwen'], enabled: true },

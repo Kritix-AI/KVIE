@@ -14,7 +14,7 @@
     <LinearLayout
         android:id="@+id/voiceToolbar"
         android:layout_width="match_parent"
-        android:layout_height="42dp"
+        android:layout_height="50dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="#17171F"
@@ -22,16 +22,16 @@
         android:paddingEnd="8dp"
         android:layout_marginBottom="6dp">
 
-        <!-- Voice Mic Button -->
+        <!-- Voice Mic Button (Larger & Ergonomic) -->
         <ImageButton
             android:id="@+id/micButton"
-            android:layout_width="34dp"
-            android:layout_height="34dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:background="@drawable/mic_toolbar_btn_bg"
             android:contentDescription="Voice dictation"
             android:src="@android:drawable/ic_btn_speak_now"
             android:scaleType="centerInside"
-            android:padding="5dp" />
+            android:padding="7dp" />
 
         <!-- Status & Live Audio Waveform Text -->
         <TextView

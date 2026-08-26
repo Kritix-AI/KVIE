@@ -203,16 +203,22 @@ class FloatingMicService : Service() {
                     updateBubbleActiveState(true)
                 }
 
-                override fun onBeginningOfSpeech() {}
+                override fun onBeginningOfSpeech() {
+                    updateBubbleActiveState(true)
+                }
+
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
+
+                override fun onEndOfSpeech() {
+                    updateBubbleActiveState(false)
+                }
 
                 override fun onResults(results: android.os.Bundle?) {
+                    stopListening()
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val transcript = matches?.firstOrNull().orEmpty()
                     handleFinalTranscript(transcript)
-                    stopListening()
                 }
 
                 override fun onError(error: Int) {
@@ -241,25 +247,29 @@ class FloatingMicService : Service() {
         }
 
         try {
-            speechRecognizer?.startListening(intent)
             isListening = true
             updateBubbleActiveState(true)
+            speechRecognizer?.startListening(intent)
         } catch (_: Exception) {
             stopListening()
         }
     }
 
     private fun stopListening() {
-        try {
-            speechRecognizer?.cancel()
-        } catch (_: Exception) {}
         isListening = false
         updateBubbleActiveState(false)
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {}
     }
 
     private fun updateBubbleActiveState(active: Boolean) {
-        bubbleContainer?.isSelected = active
-        bubbleGlow?.visibility = if (active) View.VISIBLE else View.GONE
+        Handler(Looper.getMainLooper()).post {
+            bubbleContainer?.isSelected = active
+            bubbleGlow?.visibility = if (active) View.VISIBLE else View.GONE
+            bubbleMicIcon?.setColorFilter(if (active) 0xFF00E5FF.toInt() else 0xFFFFFFFF.toInt())
+        }
     }
 
     private fun handleFinalTranscript(raw: String) {
