@@ -5,6 +5,8 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +23,8 @@ class MainActivity : TauriActivity() {
     @JvmStatic
     var instance: MainActivity? = null
   }
+
+  private val mainHandler = Handler(Looper.getMainLooper())
 
   override fun onCreate(savedInstanceState: Bundle?) {
     instance = this
@@ -43,12 +47,14 @@ class MainActivity : TauriActivity() {
     if (missing.isNotEmpty()) {
       ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
     }
+
+    startBridgeAttachmentPolling()
   }
 
   override fun onResume() {
     super.onResume()
     instance = this
-    attachBridgeToWebView(window.decorView)
+    startBridgeAttachmentPolling()
   }
 
   override fun onDestroy() {
@@ -56,9 +62,23 @@ class MainActivity : TauriActivity() {
     super.onDestroy()
   }
 
+  private fun startBridgeAttachmentPolling() {
+    var attempts = 0
+    val runnable = object : Runnable {
+      override fun run() {
+        if (!attachBridgeToWebView(window.decorView) && attempts < 40) {
+          attempts++
+          mainHandler.postDelayed(this, 150)
+        }
+      }
+    }
+    mainHandler.post(runnable)
+  }
+
   private fun attachBridgeToWebView(root: View): Boolean {
     if (root is WebView) {
       try {
+        root.settings.javaScriptEnabled = true
         root.addJavascriptInterface(AndroidBridge(this), "AndroidKeyboardBridge")
         return true
       } catch (_: Exception) {

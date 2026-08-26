@@ -24,19 +24,20 @@ export const openAndroidKeyboardSettings = (): void => {
       window.AndroidKeyboardBridge.openKeyboardSettings()
       return
     } catch (e) {
-      console.warn('AndroidKeyboardBridge failed', e)
+      console.warn('AndroidKeyboardBridge.openKeyboardSettings failed', e)
     }
   }
 
-  try {
-    const iframe = document.createElement('iframe')
-    iframe.style.display = 'none'
-    iframe.src = 'kvie-action://open-keyboard-settings'
-    document.body.appendChild(iframe)
-    setTimeout(() => document.body.removeChild(iframe), 1000)
-  } catch (err) {
-    console.error('Failed to trigger action', err)
+  if (window.AndroidKeyboardBridge?.openSetupActivity) {
+    try {
+      window.AndroidKeyboardBridge.openSetupActivity()
+      return
+    } catch (e) {
+      console.warn('AndroidKeyboardBridge.openSetupActivity failed', e)
+    }
   }
+
+  console.warn('AndroidKeyboardBridge is not yet attached')
 }
 
 export const showAndroidKeyboardPicker = (): void => {
@@ -45,19 +46,11 @@ export const showAndroidKeyboardPicker = (): void => {
       window.AndroidKeyboardBridge.showKeyboardPicker()
       return
     } catch (e) {
-      console.warn('AndroidKeyboardBridge failed', e)
+      console.warn('AndroidKeyboardBridge.showKeyboardPicker failed', e)
     }
   }
 
-  try {
-    const iframe = document.createElement('iframe')
-    iframe.style.display = 'none'
-    iframe.src = 'kvie-action://show-keyboard-picker'
-    document.body.appendChild(iframe)
-    setTimeout(() => document.body.removeChild(iframe), 1000)
-  } catch (err) {
-    console.error('Failed to trigger action', err)
-  }
+  console.warn('AndroidKeyboardBridge is not yet attached')
 }
 
 export const requestAndroidMicPermission = (): void => {
@@ -66,17 +59,9 @@ export const requestAndroidMicPermission = (): void => {
       window.AndroidKeyboardBridge.requestMicPermission()
       return
     } catch (e) {
-      console.warn('AndroidKeyboardBridge failed', e)
+      console.warn('AndroidKeyboardBridge.requestMicPermission failed', e)
     }
   }
-
-  try {
-    const iframe = document.createElement('iframe')
-    iframe.style.display = 'none'
-    iframe.src = 'kvie-action://request-mic'
-    document.body.appendChild(iframe)
-    setTimeout(() => document.body.removeChild(iframe), 1000)
-  } catch {}
 
   navigator.mediaDevices?.getUserMedia?.({ audio: true }).catch(() => {})
 }
