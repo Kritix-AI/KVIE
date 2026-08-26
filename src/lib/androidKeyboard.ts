@@ -1,5 +1,3 @@
-import { invoke } from '@tauri-apps/api/core'
-
 declare global {
   interface Window {
     AndroidKeyboardBridge?: {
@@ -7,6 +5,7 @@ declare global {
       openKeyboardSettings?: () => void
       showKeyboardPicker?: () => void
       requestMicPermission?: () => void
+      openSetupActivity?: () => void
       isMicPermissionGranted?: () => boolean
       isKeyboardEnabled?: () => boolean
     }
@@ -19,62 +18,64 @@ export const isAndroid = (): boolean => {
   return /android/i.test(navigator.userAgent)
 }
 
-export const openAndroidKeyboardSettings = async (): Promise<void> => {
-  // 1. Try Android Native Bridge
+export const openAndroidKeyboardSettings = (): void => {
   if (window.AndroidKeyboardBridge?.openKeyboardSettings) {
     try {
       window.AndroidKeyboardBridge.openKeyboardSettings()
       return
     } catch (e) {
-      console.warn('AndroidKeyboardBridge.openKeyboardSettings failed', e)
+      console.warn('AndroidKeyboardBridge failed', e)
     }
   }
 
-  // 2. Try Tauri IPC Invoke
   try {
-    await invoke('open_android_keyboard_settings')
-    return
-  } catch {}
-
-  // 3. Fallback to Android Intent URL
-  try {
-    window.location.href = 'intent:#Intent;action=android.settings.INPUT_METHOD_SETTINGS;end'
+    const iframe = document.createElement('iframe')
+    iframe.style.display = 'none'
+    iframe.src = 'kvie-action://open-keyboard-settings'
+    document.body.appendChild(iframe)
+    setTimeout(() => document.body.removeChild(iframe), 1000)
   } catch (err) {
-    console.error('Failed to open keyboard settings via intent', err)
+    console.error('Failed to trigger action', err)
   }
 }
 
-export const showAndroidKeyboardPicker = async (): Promise<void> => {
-  // 1. Try Android Native Bridge
+export const showAndroidKeyboardPicker = (): void => {
   if (window.AndroidKeyboardBridge?.showKeyboardPicker) {
     try {
       window.AndroidKeyboardBridge.showKeyboardPicker()
       return
     } catch (e) {
-      console.warn('AndroidKeyboardBridge.showKeyboardPicker failed', e)
+      console.warn('AndroidKeyboardBridge failed', e)
     }
   }
 
-  // 2. Try Tauri IPC Invoke
   try {
-    await invoke('show_android_keyboard_picker')
-    return
-  } catch {}
+    const iframe = document.createElement('iframe')
+    iframe.style.display = 'none'
+    iframe.src = 'kvie-action://show-keyboard-picker'
+    document.body.appendChild(iframe)
+    setTimeout(() => document.body.removeChild(iframe), 1000)
+  } catch (err) {
+    console.error('Failed to trigger action', err)
+  }
 }
 
-export const requestAndroidMicPermission = async (): Promise<void> => {
+export const requestAndroidMicPermission = (): void => {
   if (window.AndroidKeyboardBridge?.requestMicPermission) {
     try {
       window.AndroidKeyboardBridge.requestMicPermission()
       return
     } catch (e) {
-      console.warn('AndroidKeyboardBridge.requestMicPermission failed', e)
+      console.warn('AndroidKeyboardBridge failed', e)
     }
   }
 
   try {
-    await invoke('request_android_mic_permission')
-    return
+    const iframe = document.createElement('iframe')
+    iframe.style.display = 'none'
+    iframe.src = 'kvie-action://request-mic'
+    document.body.appendChild(iframe)
+    setTimeout(() => document.body.removeChild(iframe), 1000)
   } catch {}
 
   navigator.mediaDevices?.getUserMedia?.({ audio: true }).catch(() => {})

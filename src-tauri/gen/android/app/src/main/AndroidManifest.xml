@@ -27,6 +27,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name="ai.kritix.kviekeyboard.SetupActivity"
+            android:label="KVIE Keyboard Setup"
+            android:exported="true" />
+
         <!-- KVIE Voice Keyboard IME Service -->
         <service
             android:name="ai.kritix.kviekeyboard.KVIEInputMethodService"
