@@ -49,7 +49,21 @@ class SmolLMEngine(private val context: Context) {
     private fun runEdgeHeuristicRefinement(text: String): String {
         var result = text.trim()
 
-        // 1. Remove common conversational filler words
+        // 1. Spoken punctuation substitution
+        val spokenPunctuation = mapOf(
+            "\\bcomma\\b" to ",",
+            "\\bperiod\\b" to ".",
+            "\\bfull stop\\b" to ".",
+            "\\bquestion mark\\b" to "?",
+            "\\bexclamation mark\\b" to "!",
+            "\\bexclamation point\\b" to "!",
+            "\\bnew line\\b" to "\n"
+        )
+        for ((pattern, sym) in spokenPunctuation) {
+            result = result.replace(Regex(pattern, RegexOption.IGNORE_CASE), sym)
+        }
+
+        // 2. Remove common conversational filler words
         val fillers = listOf(
             "\\bum+\\b", "\\buh+\\b", "\\blike\\b", "\\byou know\\b",
             "\\bmatlab\\b", "\\bbasically\\b", "\\bactually\\b", "\\bso yeah\\b"
@@ -58,17 +72,25 @@ class SmolLMEngine(private val context: Context) {
             result = result.replace(Regex(f, RegexOption.IGNORE_CASE), "")
         }
 
-        // 2. Normalize whitespace
+        // 3. Normalize whitespace around punctuation
+        result = result.replace(Regex("\\s+([,.:;?!])"), "$1")
+        result = result.replace(Regex("([,.:;?!])([a-zA-Z])"), "$1 $2")
         result = result.replace(Regex("\\s+"), " ").trim()
 
-        // 3. Sentence boundary capitalization
-        val sentences = result.split(Regex("(?<=[.!?])\\s+")).map { sentence ->
+        // 4. Capitalize standalone pronoun "i"
+        result = result.replace(Regex("\\bi\\b"), "I")
+        result = result.replace(Regex("\\bi'm\\b", RegexOption.IGNORE_CASE), "I'm")
+        result = result.replace(Regex("\\bi've\\b", RegexOption.IGNORE_CASE), "I've")
+        result = result.replace(Regex("\\bi'll\\b", RegexOption.IGNORE_CASE), "I'll")
+
+        // 5. Sentence boundary capitalization
+        val sentences = result.split(Regex("(?<=[.!?\\n])\\s+")).map { sentence ->
             sentence.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         }
         result = sentences.joinToString(" ")
 
-        // 4. Ensure terminal punctuation if length > 3 words
-        if (result.split(" ").size >= 4 && !result.endsWith(".") && !result.endsWith("?") && !result.endsWith("!")) {
+        // 6. Ensure terminal punctuation if length >= 3 words
+        if (result.split(" ").size >= 3 && !result.endsWith(".") && !result.endsWith("?") && !result.endsWith("!")) {
             result = "$result."
         }
 

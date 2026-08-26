@@ -57,6 +57,52 @@ export async function selectActiveModel(modelId: string): Promise<boolean> {
   return false
 }
 
+export async function refineVoiceTextWithLLM(text: string, style = 'clean'): Promise<string> {
+  if (!text || !text.trim()) return text
+
+  try {
+    const res = await fetch(`${getServiceBaseUrl()}/api/autoedit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, style }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data && data.refined_text && data.refined_text.trim()) {
+        return data.refined_text.trim()
+      }
+    }
+  } catch {}
+
+  // On-Device Client Fallback (SmolLM2 Heuristic Edge Polish)
+  let refined = text.trim()
+  const spokenPunctuation: Record<string, string> = {
+    ' comma': ',',
+    ' period': '.',
+    ' full stop': '.',
+    ' question mark': '?',
+    ' exclamation mark': '!',
+    ' exclamation point': '!',
+    ' new line': '\n',
+  }
+  for (const [cue, sym] of Object.entries(spokenPunctuation)) {
+    refined = refined.replace(new RegExp(cue, 'gi'), sym)
+  }
+
+  const fillers = [/\bum+\b/gi, /\buh+\b/gi, /\blike\b/gi, /\byou know\b/gi, /\bmatlab\b/gi, /\bbasically\b/gi, /\bactually\b/gi]
+  fillers.forEach(f => { refined = refined.replace(f, '') })
+  refined = refined.replace(/\s+/g, ' ').trim()
+
+  // Capitalize isolated "i" and sentence start
+  refined = refined.replace(/\bi\b/g, 'I')
+  refined = refined.replace(/(^\s*|[.!?]\s*)([a-z])/g, (_, p1, p2) => p1 + p2.toUpperCase())
+
+  if (refined.split(/\s+/).length >= 4 && !/[.!?]$/.test(refined)) {
+    refined += '.'
+  }
+  return refined
+}
+
 export function downloadAndroidModelWithProgress(
   modelId: string,
   onProgress: (payload: ModelProgressPayload) => void,

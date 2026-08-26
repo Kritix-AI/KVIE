@@ -21,8 +21,8 @@ object AutoEditClient {
     )
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(1500, TimeUnit.MILLISECONDS)
-        .readTimeout(3000, TimeUnit.MILLISECONDS)
+        .connectTimeout(400, TimeUnit.MILLISECONDS)
+        .readTimeout(800, TimeUnit.MILLISECONDS)
         .build()
 
     fun init(context: Context) {
@@ -38,7 +38,7 @@ object AutoEditClient {
             init(context)
         }
 
-        // 1. Try PC / Local Server backend if accessible
+        // 1. Try PC / Local Server backend with ultra-fast probe
         val body = JSONObject().put("text", text).toString()
             .toRequestBody("application/json".toMediaType())
 
@@ -59,7 +59,7 @@ object AutoEditClient {
             }
         }
 
-        // 2. On-Device Fallback: Run SmolLM2 360M edge inference
+        // 2. On-Device Instant SmolLM2 Engine Execution
         return@withContext smolLMEngine?.refineText(text)
     }
 }

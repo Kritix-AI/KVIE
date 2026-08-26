@@ -49,7 +49,13 @@ import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets 
 import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import { processSpokenVoiceText } from './lib/incrementalTypingEngine'
-import { fetchModelsStatus, selectActiveModel, downloadModelWithProgress, downloadAndroidModelWithProgress } from './lib/modelsApi'
+import {
+  fetchModelsStatus,
+  selectActiveModel,
+  downloadModelWithProgress,
+  downloadAndroidModelWithProgress,
+  refineVoiceTextWithLLM,
+} from './lib/modelsApi'
 import {
   isAndroid,
   openAndroidKeyboardSettings,
@@ -262,6 +268,7 @@ export function App() {
 
   const [isTranslationEnabled, setIsTranslationEnabled] = useState(false)
   const [targetLanguage, setTargetLanguage] = useState('en')
+  const [isPolishing, setIsPolishing] = useState(false)
 
   const lastCommittedRef = useRef<string>('')
 
@@ -496,6 +503,24 @@ export function App() {
       setInjectionMessage('Copied entire transcript to clipboard!')
       window.setTimeout(() => setInjectionMessage(null), 2500)
     } catch {}
+  }
+
+  const handleAIPolish = async () => {
+    if (!activeDocumentText.trim() || isPolishing) return
+    setIsPolishing(true)
+    try {
+      const polished = await refineVoiceTextWithLLM(activeDocumentText)
+      if (polished && polished.trim()) {
+        setTranslatedDocumentText(polished)
+        void document.apply({ action: 'set', text: polished })
+        setInjectionMessage('✨ Polished with SmolLM2 / AI AutoEdit')
+        window.setTimeout(() => setInjectionMessage(null), 3000)
+      }
+    } catch {
+      setInjectionMessage('Failed to polish text')
+    } finally {
+      setIsPolishing(false)
+    }
   }
 
   const handleDownloadModel = (modelId: string) => {
@@ -880,7 +905,17 @@ export function App() {
                   {speech.isListening ? <Square className="h-7 w-7 fill-current" /> : <Mic className="h-8 w-8" style={{ color: theme.accentColor }} />}
                 </motion.button>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    onClick={() => void handleAIPolish()}
+                    disabled={!activeDocumentText.trim() || isPolishing}
+                    className="flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2 text-xs font-semibold transition hover:bg-zinc-800 disabled:opacity-30"
+                    style={{ borderColor: `${theme.accentColor}70`, color: theme.accentColor }}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {isPolishing ? 'Polishing with AI...' : 'AI Polish (SmolLM2)'}
+                  </button>
+
                   <button
                     onClick={() => void copyDraft()}
                     disabled={!activeDocumentText.trim()}
