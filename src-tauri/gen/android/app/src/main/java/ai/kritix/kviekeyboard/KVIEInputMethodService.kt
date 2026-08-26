@@ -43,6 +43,7 @@ class KVIEInputMethodService : InputMethodService() {
         super.onCreate()
         whisperEngine = WhisperEngine(this)
         parakeetEngine = ParakeetEngine(this)
+        AutoEditClient.init(this)
     }
 
     override fun onCreateInputView(): View {

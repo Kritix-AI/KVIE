@@ -65,7 +65,7 @@ export function downloadAndroidModelWithProgress(
 ): () => void {
   let isCancelled = false
   let progress = 0
-  const totalMB = modelId.includes('tiny') ? 42 : modelId.includes('base') ? 142 : 128
+  const totalMB = modelId.includes('smollm2') ? 220 : modelId.includes('tiny') ? 42 : modelId.includes('base') ? 142 : 128
   const totalBytes = totalMB * 1024 * 1024
 
   onProgress({

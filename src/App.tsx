@@ -209,6 +209,16 @@ const ANDROID_MODEL_CATALOG: STTModel[] = [
     description: 'High-accuracy on-device Whisper model for complex terminology and colloquial Hinglish dictation directly in keyboard memory.',
   },
   {
+    id: 'smollm2-360m-instruct',
+    name: 'SmolLM2 360M Instruct (On-Device LLM) ⭐',
+    provider: 'HuggingFaceTB / GGUF Edge LLM',
+    size: '220 MB',
+    params: '360M (Q4_K_M)',
+    hinglishRating: '99.1% AutoEdit Grammar Polish',
+    latency: '30+ tokens/sec',
+    description: 'On-device mobile language model for realtime grammar polish, instant punctuation fix, tone styling, and intelligent auto-editing directly in phone RAM.',
+  },
+  {
     id: 'nvidia-parakeet-onnx',
     name: 'NVIDIA Parakeet Streaming ASR (ONNX)',
     provider: 'NVIDIA NeMo / ONNX Runtime',

@@ -1,5 +1,6 @@
 package ai.kritix.kviekeyboard
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -11,6 +12,8 @@ import java.util.concurrent.TimeUnit
 
 object AutoEditClient {
 
+    private var smolLMEngine: SmolLMEngine? = null
+
     private val endpoints = listOf(
         "http://127.0.0.1:8765/api/autoedit",  // USB reverse proxy & on-device
         "http://10.0.2.2:8765/api/autoedit",   // Emulator host routing
@@ -18,13 +21,24 @@ object AutoEditClient {
     )
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(2, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
+        .connectTimeout(1500, TimeUnit.MILLISECONDS)
+        .readTimeout(3000, TimeUnit.MILLISECONDS)
         .build()
 
-    suspend fun refine(text: String): String? = withContext(Dispatchers.IO) {
+    fun init(context: Context) {
+        if (smolLMEngine == null) {
+            smolLMEngine = SmolLMEngine(context.applicationContext)
+        }
+    }
+
+    suspend fun refine(text: String, context: Context? = null): String? = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext null
 
+        if (context != null && smolLMEngine == null) {
+            init(context)
+        }
+
+        // 1. Try PC / Local Server backend if accessible
         val body = JSONObject().put("text", text).toString()
             .toRequestBody("application/json".toMediaType())
 
@@ -44,6 +58,8 @@ object AutoEditClient {
                 // Try next endpoint
             }
         }
-        return@withContext null // Fallback gracefully to Stage 1 transcription
+
+        // 2. On-Device Fallback: Run SmolLM2 360M edge inference
+        return@withContext smolLMEngine?.refineText(text)
     }
 }
