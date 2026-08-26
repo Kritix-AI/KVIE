@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -32,38 +33,86 @@ class KVIEAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Types text directly into the currently focused EditText in any app.
+     * Types text directly into the currently focused or editable field in any active app.
      */
     fun typeTextIntoFocusedField(newText: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        // Step 1: Copy newText to system clipboard
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = ClipData.newPlainText("KVIE Voice", newText)
+        clipboard?.setPrimaryClip(clip)
+
+        // Step 2: Check all interactive windows on screen
+        var targetNode: AccessibilityNodeInfo? = null
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val interactiveWindows = windows
+            if (!interactiveWindows.isNullOrEmpty()) {
+                for (w in interactiveWindows) {
+                    val root = w.root ?: continue
+                    targetNode = findEditableNode(root)
+                    if (targetNode != null) break
+                }
+            }
+        }
+
+        if (targetNode == null) {
+            val root = rootInActiveWindow
+            if (root != null) {
+                targetNode = findEditableNode(root)
+            }
+        }
+
+        if (targetNode == null) {
+            return false
+        }
 
         try {
-            val existingText = focusedNode.text?.toString() ?: ""
+            // Step 3: Try ACTION_PASTE first (standard for all apps, preserving cursor position)
+            val pasteSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            if (pasteSuccess) {
+                return true
+            }
+
+            // Step 4: Fallback to ACTION_SET_TEXT
+            val existingText = targetNode.text?.toString() ?: ""
             val textToSet = if (existingText.isEmpty() || existingText.endsWith(" ")) {
                 existingText + newText
             } else {
                 "$existingText $newText"
             }
 
-            // 1. Try ACTION_SET_TEXT
             val arguments = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, textToSet)
             }
-            val success = focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-
-            if (!success) {
-                // 2. Fallback: Copy to clipboard and perform ACTION_PASTE
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                val clip = ClipData.newPlainText("KVIE Paste", newText)
-                clipboard?.setPrimaryClip(clip)
-                return focusedNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            }
-
-            return true
+            return targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
         } catch (_: Exception) {
             return false
         }
+    }
+
+    private fun findEditableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        // 1. Direct input focus
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused != null && (focused.isEditable || focused.isFocused)) {
+            return focused
+        }
+
+        // 2. Recursive depth-first search for focused/editable node
+        return searchNodeRecursively(root)
+    }
+
+    private fun searchNodeRecursively(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        if (node.isFocused && (node.isEditable || node.className?.contains("EditText", ignoreCase = true) == true)) {
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = searchNodeRecursively(child)
+            if (found != null) return found
+        }
+        if (node.isEditable) return node
+        return null
     }
 
     companion object {

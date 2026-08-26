@@ -63,6 +63,7 @@ import {
 import {
   isAndroid,
   openAndroidKeyboardSettings,
+  openAndroidAccessibilitySettings,
   showAndroidKeyboardPicker,
   requestAndroidMicPermission,
   isAndroidKeyboardEnabled,
@@ -1091,17 +1092,17 @@ export function App() {
                 </div>
               </div>
 
-              {/* 3 Step Setup Action Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* 4 Step Setup Action Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Step 1 */}
                 <div className="rounded-2xl border border-line bg-panel/80 p-5 flex flex-col justify-between gap-4">
                   <div className="space-y-2">
                     <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
                       STEP 1
                     </span>
-                    <h3 className="text-base font-semibold text-zinc-100">Enable Keyboard in Android</h3>
+                    <h3 className="text-base font-semibold text-zinc-100">Enable Keyboard</h3>
                     <p className="text-xs text-zinc-400">
-                      Open Android Settings &gt; Languages &amp; Input &gt; Keyboards and turn ON "KVIE Voice Keyboard".
+                      Open Android Settings &gt; Keyboards and turn ON "KVIE Voice Keyboard".
                     </p>
                   </div>
                   <button
@@ -1109,7 +1110,7 @@ export function App() {
                     className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-semibold text-black transition"
                     style={{ backgroundColor: theme.accentColor }}
                   >
-                    <ExternalLink className="h-3.5 w-3.5" /> Open Keyboard Settings
+                    <ExternalLink className="h-3.5 w-3.5" /> Keyboard Settings
                   </button>
                 </div>
 
@@ -1119,16 +1120,16 @@ export function App() {
                     <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
                       STEP 2
                     </span>
-                    <h3 className="text-base font-semibold text-zinc-100">Select Active Keyboard</h3>
+                    <h3 className="text-base font-semibold text-zinc-100">Select Active IME</h3>
                     <p className="text-xs text-zinc-400">
-                      Trigger the Android Input Method Picker and select "KVIE Voice Keyboard" as your current input.
+                      Trigger Input Method Picker and select "KVIE Voice Keyboard" as default.
                     </p>
                   </div>
                   <button
                     onClick={() => showAndroidKeyboardPicker()}
                     className="w-full flex items-center justify-center gap-2 rounded-xl border border-line bg-zinc-800 hover:bg-zinc-700 py-2.5 text-xs font-semibold text-zinc-100 transition"
                   >
-                    <Keyboard className="h-3.5 w-3.5" style={{ color: theme.accentColor }} /> Switch Active Input Method
+                    <Keyboard className="h-3.5 w-3.5" style={{ color: theme.accentColor }} /> Switch Input Method
                   </button>
                 </div>
 
@@ -1138,16 +1139,35 @@ export function App() {
                     <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
                       STEP 3
                     </span>
-                    <h3 className="text-base font-semibold text-zinc-100">Grant Microphone Access</h3>
+                    <h3 className="text-base font-semibold text-zinc-100">Grant Microphone</h3>
                     <p className="text-xs text-zinc-400">
-                      Allow KVIE to record audio so the voice keyboard can transcribe your speech in real-time.
+                      Allow KVIE to record audio so the engine can transcribe speech in real-time.
                     </p>
                   </div>
                   <button
                     onClick={() => requestAndroidMicPermission()}
                     className="w-full flex items-center justify-center gap-2 rounded-xl border border-line bg-zinc-800 hover:bg-zinc-700 py-2.5 text-xs font-semibold text-zinc-100 transition"
                   >
-                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" /> Request Mic Permission
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" /> Grant Mic Access
+                  </button>
+                </div>
+
+                {/* Step 4: Floating Mic Real-Time Auto-Typing */}
+                <div className="rounded-2xl border border-line bg-panel/80 p-5 flex flex-col justify-between gap-4">
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300">
+                      STEP 4
+                    </span>
+                    <h3 className="text-base font-semibold text-zinc-100">Floating Mic Auto-Typing</h3>
+                    <p className="text-xs text-zinc-400">
+                      Turn ON "KVIE Realtime Typing" in Accessibility to type directly into WhatsApp &amp; all apps.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => openAndroidAccessibilitySettings()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-line bg-zinc-800 hover:bg-zinc-700 py-2.5 text-xs font-semibold text-zinc-100 transition"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" style={{ color: theme.accentColor }} /> Enable Direct Typing
                   </button>
                 </div>
               </div>

@@ -3,6 +3,8 @@ declare global {
     AndroidKeyboardBridge?: {
       isAndroid?: () => boolean
       openKeyboardSettings?: () => void
+      openAccessibilitySettings?: () => void
+      isAccessibilityEnabled?: () => boolean
       showKeyboardPicker?: () => void
       requestMicPermission?: () => void
       openSetupActivity?: () => void
@@ -86,6 +88,25 @@ export const getSelectedAndroidEngine = (): string => {
 export const isAndroidKeyboardEnabled = (): boolean => {
   try {
     return window.AndroidKeyboardBridge?.isKeyboardEnabled?.() ?? false
+  } catch {
+    return false
+  }
+}
+
+export const openAndroidAccessibilitySettings = (): void => {
+  if (window.AndroidKeyboardBridge?.openAccessibilitySettings) {
+    try {
+      window.AndroidKeyboardBridge.openAccessibilitySettings()
+      return
+    } catch (e) {
+      console.warn('AndroidKeyboardBridge.openAccessibilitySettings failed', e)
+    }
+  }
+}
+
+export const isAndroidAccessibilityEnabled = (): boolean => {
+  try {
+    return window.AndroidKeyboardBridge?.isAccessibilityEnabled?.() ?? false
   } catch {
     return false
   }

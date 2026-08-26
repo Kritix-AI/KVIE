@@ -268,27 +268,45 @@ class FloatingMicService : Service() {
         val stripped = SmolLMEngine.stripFillersAndPunctuate(raw)
         if (stripped.isBlank()) return
 
-        // 1. Direct Real-Time Typing into whatever app is currently active
-        val typedDirectly = KVIEAccessibilityService.typeText(stripped)
+        // 1. Try Direct IME commit (if KVIE keyboard is currently open)
+        var typed = KVIEInputMethodService.commitFromExternal(stripped)
+
+        // 2. Try Direct Accessibility node injection (works across all apps: WhatsApp, Chrome, Telegram, etc.)
+        if (!typed) {
+            typed = KVIEAccessibilityService.typeText(stripped)
+        }
+
         SessionManager.recordSession(this, stripped, "KVIE Floating Mic")
+
+        // 3. If neither typed because Accessibility is not enabled yet, copy & guide user
+        if (!typed) {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = ClipData.newPlainText("KVIE Voice", stripped)
+            clipboard?.setPrimaryClip(clip)
+
+            if (!KVIEAccessibilityService.isAvailable) {
+                Toast.makeText(this, "🎙️ Copied! Turn ON 'KVIE Realtime Typing' in Accessibility to type directly", Toast.LENGTH_LONG).show()
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            } else {
+                Toast.makeText(this, "🎙️ Copied: \"$stripped\"", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(this, "🎙️ Typed directly into field", Toast.LENGTH_SHORT).show()
+        }
 
         scope.launch {
             val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
-            SessionManager.recordSession(this@FloatingMicService, polished, "KVIE Floating Mic (AI Polish)")
-
-            if (!typedDirectly) {
-                val typedPolished = KVIEAccessibilityService.typeText(polished)
-                if (!typedPolished) {
-                    // Fallback to clipboard if accessibility is not enabled yet
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    val clip = ClipData.newPlainText("KVIE Voice", polished)
-                    clipboard?.setPrimaryClip(clip)
-                    Toast.makeText(this@FloatingMicService, "🎙️ Copied: \"$polished\"", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@FloatingMicService, "🎙️ Typed directly into field", Toast.LENGTH_SHORT).show()
+            if (polished != stripped) {
+                SessionManager.recordSession(this@FloatingMicService, polished, "KVIE Floating Mic (AI Polish)")
+                val updatedIme = KVIEInputMethodService.commitFromExternal(polished)
+                if (!updatedIme) {
+                    KVIEAccessibilityService.typeText(polished)
                 }
-            } else {
-                Toast.makeText(this@FloatingMicService, "🎙️ Typed directly into field", Toast.LENGTH_SHORT).show()
             }
         }
     }

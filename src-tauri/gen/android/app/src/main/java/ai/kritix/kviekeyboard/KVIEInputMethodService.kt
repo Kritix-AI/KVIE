@@ -85,6 +85,7 @@ class KVIEInputMethodService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         whisperEngine = WhisperEngine(this)
         parakeetEngine = ParakeetEngine(this)
         AutoEditClient.init(this)
@@ -657,10 +658,27 @@ class KVIEInputMethodService : InputMethodService() {
         populateKeys()
     }
 
+    fun directCommitText(text: String): Boolean {
+        val ic = currentInputConnection ?: return false
+        val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
+        return ic.commitText(prefix + text + " ", 1)
+    }
+
     override fun onDestroy() {
+        if (instance == this) {
+            instance = null
+        }
         stopListening()
         speechRecognizer?.destroy()
         backspaceHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
+    }
+
+    companion object {
+        var instance: KVIEInputMethodService? = null
+
+        fun commitFromExternal(text: String): Boolean {
+            return instance?.directCommitText(text) ?: false
+        }
     }
 }

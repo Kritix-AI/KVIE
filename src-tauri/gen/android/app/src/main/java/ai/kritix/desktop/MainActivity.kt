@@ -141,6 +141,17 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  fun openAccessibilitySettingsInternal() {
+    runOnUiThread {
+      try {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+      } catch (_: Exception) {}
+    }
+  }
+
   class AndroidBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun isAndroid(): Boolean = true
@@ -148,6 +159,16 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun openKeyboardSettings() {
       activity.openKeyboardSettingsInternal()
+    }
+
+    @JavascriptInterface
+    fun openAccessibilitySettings() {
+      activity.openAccessibilitySettingsInternal()
+    }
+
+    @JavascriptInterface
+    fun isAccessibilityEnabled(): Boolean {
+      return ai.kritix.kviekeyboard.KVIEAccessibilityService.isAvailable
     }
 
     @JavascriptInterface
