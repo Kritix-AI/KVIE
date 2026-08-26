@@ -626,6 +626,7 @@ class KVIEInputMethodService : InputMethodService() {
         val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
         ic.commitText(prefix + cleanText + " ", 1)
         statusText.text = "Ready (Tap mic or type)"
+        SessionManager.recordSession(this, cleanText, "KVIE Voice Keyboard")
 
         // 2. Background SmolLM2 AutoEdit refinement pass
         scope.launch {
@@ -635,6 +636,7 @@ class KVIEInputMethodService : InputMethodService() {
                     val oldLen = cleanText.length + 1
                     ic.deleteSurroundingText(oldLen, 0)
                     ic.commitText(prefix + refined + " ", 1)
+                    SessionManager.recordSession(this@KVIEInputMethodService, refined, "KVIE Voice Keyboard (AI Polish)")
                 }
             } catch (_: Exception) {}
         }

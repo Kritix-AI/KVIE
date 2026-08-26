@@ -270,9 +270,11 @@ class FloatingMicService : Service() {
 
         // 1. Direct Real-Time Typing into whatever app is currently active
         val typedDirectly = KVIEAccessibilityService.typeText(stripped)
+        SessionManager.recordSession(this, stripped, "KVIE Floating Mic")
 
         scope.launch {
             val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
+            SessionManager.recordSession(this@FloatingMicService, polished, "KVIE Floating Mic (AI Polish)")
 
             if (!typedDirectly) {
                 val typedPolished = KVIEAccessibilityService.typeText(polished)

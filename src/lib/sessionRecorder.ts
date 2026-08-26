@@ -8,12 +8,22 @@ export interface VoiceSession {
   wordCount: number
 }
 
-export const saveVoiceSession = async (text: string, overrideApp?: string) => {
-  const cleanText = text.trim()
+export const saveVoiceSession = async (sessionOrText: string | VoiceSession, overrideApp?: string) => {
+  let cleanText = ''
+  let targetApp = overrideApp || 'Kritix Workspace'
+
+  if (typeof sessionOrText === 'string') {
+    cleanText = sessionOrText.trim()
+  } else if (sessionOrText && typeof sessionOrText === 'object') {
+    cleanText = (sessionOrText.text || '').trim()
+    if (sessionOrText.targetApp) {
+      targetApp = sessionOrText.targetApp
+    }
+  }
+
   if (!cleanText || cleanText.length < 2) return
 
-  let targetApp = overrideApp || 'Kritix Workspace'
-  if (!overrideApp) {
+  if (!overrideApp && typeof sessionOrText === 'string') {
     try {
       const appInfo = await tauriBridge.getActiveAppInfo()
       if (appInfo && appInfo.app_name) {
@@ -49,5 +59,20 @@ export const saveVoiceSession = async (text: string, overrideApp?: string) => {
 
   const updatedSessions = [newSession, ...currentSessions]
   localStorage.setItem('kvie_voice_sessions', JSON.stringify(updatedSessions))
+  window.dispatchEvent(new Event('storage'))
+}
+
+export const getRecordedVoiceSessions = (): VoiceSession[] => {
+  try {
+    const raw = localStorage.getItem('kvie_voice_sessions')
+    if (raw) {
+      return JSON.parse(raw)
+    }
+  } catch {}
+  return []
+}
+
+export const clearVoiceSessions = () => {
+  localStorage.removeItem('kvie_voice_sessions')
   window.dispatchEvent(new Event('storage'))
 }

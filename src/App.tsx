@@ -48,7 +48,7 @@ import { useLocalStreamingVoice } from './hooks/useLocalStreamingVoice'
 import { runGrammarRouter } from './lib/grammarRouter'
 import { useAppTheme } from './hooks/useAppTheme'
 import { tauriBridge } from './lib/tauriBridge'
-import { saveVoiceSession } from './lib/sessionRecorder'
+import { saveVoiceSession, clearVoiceSessions, VoiceSession } from './lib/sessionRecorder'
 import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets } from './lib/snippetsEngine'
 import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
@@ -299,16 +299,14 @@ export function App() {
       // Android SpeechRecognizer is built into the OS, others require on-device download
       setDownloadedModels(['android-speech-recognizer', ...savedAndroidDownloads])
     }
-  }, [])
 
-  useEffect(() => {
     setSnippets(getVoiceSnippets())
     setCustomWords(getCustomDictionary())
     const tr = getTranslationSettings()
     setIsTranslationEnabled(tr.enabled)
     setTargetLanguage(tr.targetLanguage)
 
-    if (!isAndroid()) {
+    if (!isAndroidEnv) {
       const savedActive = localStorage.getItem('kvie_active_stt_model')
       if (savedActive) {
         setActiveModelId(savedActive)
@@ -325,6 +323,35 @@ export function App() {
       })()
     }
   }, [])
+
+  const loadSessions = () => {
+    try {
+      const saved = localStorage.getItem('kvie_voice_sessions')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed)) {
+          setSessions(parsed)
+          return
+        }
+      }
+      setSessions([])
+    } catch {
+      setSessions([])
+    }
+  }
+
+  useEffect(() => {
+    loadSessions()
+    const handleStorage = () => loadSessions()
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+
+  useEffect(() => {
+    if (activeNav === 'Sessions') {
+      loadSessions()
+    }
+  }, [activeNav])
 
   const handleAddSnippet = () => {
     if (!newTriggerCue.trim() || !newExpandedText.trim()) return
@@ -491,6 +518,18 @@ export function App() {
   const activeInterimText = speech.interimTranscript
     ? applyCustomDictionary(expandVoiceSnippets(speech.interimTranscript).expandedText)
     : ''
+
+  // Auto-save voice sessions when speech dictation finishes
+  const wasListeningRef = useRef(false)
+  useEffect(() => {
+    if (wasListeningRef.current && !speech.isListening) {
+      if (activeDocumentText.trim().length >= 2) {
+        saveVoiceSession(activeDocumentText, isAndroid() ? 'KVIE Mobile Workspace' : 'Kritix Workspace')
+        loadSessions()
+      }
+    }
+    wasListeningRef.current = speech.isListening
+  }, [speech.isListening, activeDocumentText])
 
   const wordCount = useMemo(() => activeDocumentText.trim() ? activeDocumentText.trim().split(/\s+/).length : 0, [activeDocumentText])
 
@@ -1207,18 +1246,38 @@ export function App() {
                     className="w-full rounded-2xl border border-line bg-panel py-2.5 pl-10 pr-4 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none"
                   />
                 </div>
-                <span className="text-xs font-mono text-zinc-400 bg-zinc-800/80 px-3 py-1.5 rounded-xl border border-line self-start sm:self-center">
-                  {filteredSessions.length} Recorded Sessions
-                </span>
+                <div className="flex items-center gap-2 self-start sm:self-center">
+                  <span className="text-xs font-mono text-zinc-400 bg-zinc-800/80 px-3 py-1.5 rounded-xl border border-line">
+                    {filteredSessions.length} Recorded Sessions
+                  </span>
+                  {filteredSessions.length > 0 && (
+                    <button
+                      onClick={() => {
+                        clearVoiceSessions()
+                        setSessions([])
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-rose-400 border border-line bg-zinc-800/60 hover:bg-rose-500/10 px-3 py-1.5 rounded-xl transition"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               {filteredSessions.length === 0 ? (
-                <div className="rounded-3xl border border-line bg-panel/50 p-12 text-center">
-                  <MessageSquare className="h-10 w-10 mx-auto mb-3 text-zinc-600" />
+                <div className="rounded-3xl border border-line bg-panel/50 p-12 text-center space-y-3">
+                  <MessageSquare className="h-10 w-10 mx-auto text-zinc-600" />
                   <h3 className="text-base font-semibold text-zinc-300">No voice sessions recorded yet</h3>
-                  <p className="text-xs text-zinc-500 mt-1 max-w-md mx-auto">
-                    Start speaking in the workspace or through the KVIE Voice Keyboard to record transcribed sessions with timestamp history.
+                  <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                    Start speaking in the Workspace or dictating through the KVIE Voice Keyboard / Floating Mic to auto-record your transcripts here!
                   </p>
+                  <button
+                    onClick={() => setActiveNav('Workspace')}
+                    className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold text-black transition mt-2"
+                    style={{ backgroundColor: theme.accentColor }}
+                  >
+                    <Mic className="h-3.5 w-3.5 stroke-[2.5]" /> Go to Workspace
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-3">
