@@ -9,7 +9,12 @@ export interface AutoEditOptions {
   modelId?: string
 }
 
-// Stage 1: Ultra-Fast Regex Hesitation & Filler Word Sanitizer (0ms Latency)
+import { expandVoiceSnippets } from './snippetsEngine'
+import { applyCustomDictionary, getCustomVocabularyPrompt } from './customDictionary'
+import { getTranslationSettings, translateText } from './translationEngine'
+import { TokenEngine, SentenceEngine, ParagraphEngine, FinalEditor, runGrammarRouter } from './grammarRouter'
+
+// Stage 1: Ultra-Fast Regex Hesitation & Filler Word Sanitizer + Token Engine (0ms Latency)
 export function sanitizeRawTranscript(text: string): string {
   if (!text) return ''
 
@@ -17,28 +22,22 @@ export function sanitizeRawTranscript(text: string): string {
     // Strip vocal hesitation sounds
     .replace(/\b(um+|uh+|aah+|umm+|uhh+|er+)\b/gi, '')
     // Strip repetitive conversational fillers
-    .replace(/\b(like|you know|i mean|basically|actually)\s*,?/gi, '')
+    .replace(/\b(matlab ki|matlab|yaani|basically|actually|you know|i mean|so yeah)\b/gi, '')
+    .replace(/(^\s*like\s+)|(,\s*like\s*,?)|(\s+like\s+(?=[,.:;?!]))/gi, ' ')
     // Fix false starts like "at 2... actually 3" -> "at 3"
     .replace(/(\b\w+\b)\s+(\.\.\.|—|-)\s+(actually|i mean|no|wait)\s+/gi, '')
-    // Remove duplicate consecutive words ("the the" -> "the")
-    .replace(/\b(\w+)\s+\1\b/gi, '$1')
-    // Fix spacing around punctuation
-    .replace(/\s+([.,!?])/g, '$1')
     // Remove extra double spaces
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (cleaned.length > 0) {
-    // Capitalize first character
-    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
-  }
+  // Run through Multi-Tier Token & Sentence Rules
+  const tokenPassed = TokenEngine.process(cleaned)
+  const sentencePassed = SentenceEngine.process(tokenPassed)
+  const paragraphPassed = ParagraphEngine.process(sentencePassed)
+  const finalCleaned = FinalEditor.process(paragraphPassed)
 
-  return cleaned
+  return finalCleaned
 }
-
-import { expandVoiceSnippets } from './snippetsEngine'
-import { applyCustomDictionary, getCustomVocabularyPrompt } from './customDictionary'
-import { getTranslationSettings, translateText } from './translationEngine'
 
 // Stage 2: Qwen2.5-1.5B-Instruct LLM Auto-Edit Engine + Snippet Expansion + Translation + Custom Dictionary
 export async function runQwenAutoEdit(

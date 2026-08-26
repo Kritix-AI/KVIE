@@ -51,7 +51,7 @@ class SmolLMEngine(private val context: Context) {
          * Ultra-fast synchronous filler-word stripping and punctuation cleanup.
          * Runs in <0.5ms directly on device BEFORE text hits the active input field.
          */
-        fun stripFillersAndPunctuate(text: String): String {
+        fun stripFillersAndPunctuate(text: String, enableGrammarRouter: Boolean = true): String {
             if (text.isBlank()) return ""
 
             var result = text.trim()
@@ -105,12 +105,10 @@ class SmolLMEngine(private val context: Context) {
             }
             result = sentences.joinToString(" ")
 
-            // 6. Ensure terminal period if length >= 3 words and no trailing punctuation
-            if (result.split(" ").size >= 3 && !result.endsWith(".") && !result.endsWith("?") && !result.endsWith("!")) {
-                result = "$result."
-            }
+            // 6. Route through Multi-Tier Grammar Router Pipeline (Token, Sentence, Paragraph Engine)
+            val routed = if (enableGrammarRouter) GrammarRouter.route(result, true) else result.trim()
 
-            return result.trim()
+            return routed.trim()
         }
     }
 }

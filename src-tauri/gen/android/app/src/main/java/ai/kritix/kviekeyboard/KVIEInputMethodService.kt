@@ -401,7 +401,7 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     /**
-     * 1-Tap On-Device SmolLM2 AutoEdit Polish for current input connection text
+     * 1-Tap Multi-Tier Grammar Router & On-Device SmolLM2 Polish
      */
     private fun triggerAIPolish() {
         val ic = currentInputConnection ?: return
@@ -411,16 +411,22 @@ class KVIEInputMethodService : InputMethodService() {
             return
         }
 
-        statusText.text = "✨ Polishing with SmolLM2..."
+        statusText.text = "✨ Routing & Polishing..."
+        val tokenCorrected = GrammarRouter.route(before, isGrammarRouterEnabled())
+        if (tokenCorrected != before) {
+            ic.deleteSurroundingText(before.length, 0)
+            ic.commitText(tokenCorrected, 1)
+        }
+
         scope.launch {
             try {
-                val polished = AutoEditClient.refine(before, this@KVIEInputMethodService)
-                if (polished != null && polished.isNotBlank() && polished != before) {
-                    ic.deleteSurroundingText(before.length, 0)
+                val polished = AutoEditClient.refine(tokenCorrected, this@KVIEInputMethodService)
+                if (polished != null && polished.isNotBlank() && polished != tokenCorrected) {
+                    ic.deleteSurroundingText(tokenCorrected.length, 0)
                     ic.commitText(polished, 1)
-                    statusText.text = "✨ Cleaned & Polished!"
+                    statusText.text = "✨ Grammar Polished!"
                 } else {
-                    statusText.text = "Already polished ✨"
+                    statusText.text = "Grammar Clean ✨"
                 }
             } catch (e: Exception) {
                 statusText.text = "Polish ready"
@@ -444,6 +450,11 @@ class KVIEInputMethodService : InputMethodService() {
         val serviceIntent = Intent(this, FloatingMicService::class.java)
         startService(serviceIntent)
         requestHideSelf(0)
+    }
+
+    private fun isGrammarRouterEnabled(): Boolean {
+        val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("grammar_router_enabled", true)
     }
 
     private fun getActiveEngineId(): String {

@@ -38,11 +38,14 @@ import {
   CheckCircle,
   AlertCircle,
   X,
+  GitBranch,
+  CheckCheck,
 } from 'lucide-react'
 import { listen } from '@tauri-apps/api/event'
 import { useKvieDocument } from './hooks/useKvieDocument'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useLocalStreamingVoice } from './hooks/useLocalStreamingVoice'
+import { runGrammarRouter } from './lib/grammarRouter'
 import { useAppTheme } from './hooks/useAppTheme'
 import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
@@ -270,6 +273,12 @@ export function App() {
   const [isTranslationEnabled, setIsTranslationEnabled] = useState(false)
   const [targetLanguage, setTargetLanguage] = useState('en')
   const [isPolishing, setIsPolishing] = useState(false)
+
+  const [isGrammarRouterEnabled, setIsGrammarRouterEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('kvie_grammar_router') !== 'false'
+  })
+  const [grammarTestInput, setGrammarTestInput] = useState('teh meeting was delayed and their going to the office with you\'re car')
+  const [grammarTestOutput, setGrammarTestOutput] = useState('')
 
   const [isKeyboardBannerDismissed, setIsKeyboardBannerDismissed] = useState(false)
 
@@ -513,11 +522,14 @@ export function App() {
     if (!activeDocumentText.trim() || isPolishing) return
     setIsPolishing(true)
     try {
-      const polished = await refineVoiceTextWithLLM(activeDocumentText)
-      if (polished && polished.trim()) {
-        setTranslatedDocumentText(polished)
-        void document.apply({ action: 'set', text: polished })
-        setInjectionMessage('✨ Polished with SmolLM2 / AI AutoEdit')
+      // Pass through Multi-Tier Grammar Router
+      const routerOutput = await runGrammarRouter(activeDocumentText, { enabled: isGrammarRouterEnabled })
+      const polished = await refineVoiceTextWithLLM(routerOutput)
+      const finalText = (polished && polished.trim()) ? polished : routerOutput
+      if (finalText && finalText.trim()) {
+        setTranslatedDocumentText(finalText)
+        void document.apply({ action: 'set', text: finalText })
+        setInjectionMessage('✨ Corrected via Multi-Tier Grammar Router & AI Polish')
         window.setTimeout(() => setInjectionMessage(null), 3000)
       }
     } catch {
@@ -525,6 +537,20 @@ export function App() {
     } finally {
       setIsPolishing(false)
     }
+  }
+
+  const handleToggleGrammarRouter = () => {
+    setIsGrammarRouterEnabled(prev => {
+      const next = !prev
+      localStorage.setItem('kvie_grammar_router', String(next))
+      return next
+    })
+  }
+
+  const handleTestGrammarRouter = async () => {
+    if (!grammarTestInput.trim()) return
+    const res = await runGrammarRouter(grammarTestInput, { enabled: isGrammarRouterEnabled })
+    setGrammarTestOutput(res)
   }
 
   const handleDownloadModel = (modelId: string) => {
@@ -1365,6 +1391,92 @@ export function App() {
                       </button>
                     )
                   })}
+                </div>
+              </div>
+
+              {/* MULTI-TIER GRAMMAR ROUTER PIPELINE */}
+              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
+                      <GitBranch className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-zinc-100 text-lg">Multi-Tier Grammar Router</h3>
+                        <span className="rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 border border-emerald-500/30 font-medium">
+                          Token + Sentence + Paragraph
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400">Intelligent 4-tier engine for spelling typos, grammar structure, homophones, and coherence</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleToggleGrammarRouter}
+                    className={`h-6 w-11 rounded-full p-1 transition ${isGrammarRouterEnabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
+                    style={isGrammarRouterEnabled ? { backgroundColor: theme.accentColor } : {}}
+                  >
+                    <div className={`h-4 w-4 rounded-full bg-white transition ${isGrammarRouterEnabled ? 'translate-x-5' : ''}`} />
+                  </button>
+                </div>
+
+                {/* 3 Tier Visual Architecture Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="rounded-2xl border border-line bg-zinc-900/60 p-4 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold font-mono text-cyan-400">TIER 1: TOKEN ENGINE</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">0ms Pre-LLM</span>
+                    </div>
+                    <h4 className="text-xs font-semibold text-zinc-200">Letter &amp; Word Corrections</h4>
+                    <p className="text-[11px] text-zinc-400">Fixes typos (<code className="text-amber-300">teh→the</code>), casing (<code className="text-amber-300">i→I</code>), and homophones (<code className="text-amber-300">their/they're</code>, <code className="text-amber-300">your/you're</code>).</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-line bg-zinc-900/60 p-4 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold font-mono text-emerald-400">TIER 2: SENTENCE ENGINE</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">Grammar &amp; Tense</span>
+                    </div>
+                    <h4 className="text-xs font-semibold text-zinc-200">Structure &amp; Agreement</h4>
+                    <p className="text-[11px] text-zinc-400">Corrects subject–verb agreement, articles (<code className="text-amber-300">a/an</code>), prepositions (<code className="text-amber-300">interested in</code>), and punctuation.</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-line bg-zinc-900/60 p-4 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold font-mono text-purple-400">TIER 3: PARAGRAPH &amp; FINAL</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">Intent Safe</span>
+                    </div>
+                    <h4 className="text-xs font-semibold text-zinc-200">Context &amp; Coherence</h4>
+                    <p className="text-[11px] text-zinc-400">Removes duplicate words, cleans conversational restart fragments, and normalizes flow while preserving user meaning.</p>
+                  </div>
+                </div>
+
+                {/* Live Interactive Grammar Router Playground */}
+                <div className="rounded-2xl border border-line/80 bg-zinc-900/90 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-zinc-300">Interactive Pipeline Tester:</span>
+                    <button
+                      onClick={() => void handleTestGrammarRouter()}
+                      className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold text-black transition"
+                      style={{ backgroundColor: theme.accentColor }}
+                    >
+                      <Sparkles className="h-3 w-3 stroke-[2.5]" /> Run Router
+                    </button>
+                  </div>
+
+                  <input
+                    type="text"
+                    value={grammarTestInput}
+                    onChange={e => setGrammarTestInput(e.target.value)}
+                    placeholder="Type raw uncorrected sentence here..."
+                    className="w-full rounded-xl border border-line bg-panel px-3.5 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-500 focus:outline-none"
+                  />
+
+                  {grammarTestOutput && (
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                      <span className="text-[10px] font-bold font-mono text-emerald-400 uppercase">Corrected Output:</span>
+                      <p className="text-xs font-medium text-emerald-200 font-mono mt-0.5">{grammarTestOutput}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
