@@ -915,19 +915,43 @@ export function App() {
 
               {/* Bottom In-App Mic Controller */}
               <div className="mt-6 flex flex-col items-center gap-3">
-                <motion.button
-                  whileTap={{ scale: 0.92 }}
-                  whileHover={{ scale: 1.05 }}
-                  onClick={speech.isListening ? speech.stopListening : speech.startListening}
-                  disabled={!speech.isSupported}
-                  className={`grid h-18 w-18 sm:h-20 sm:w-20 place-items-center rounded-full border transition ${
-                    speech.isListening ? 'text-white shadow-xl' : 'border-line bg-zinc-900 text-zinc-300 hover:border-zinc-700'
-                  } disabled:opacity-40`}
-                  style={speech.isListening ? { backgroundColor: theme.accentColor, borderColor: theme.accentColor, boxShadow: `0 0 50px ${theme.accentColor}70` } : {}}
-                  aria-label={speech.isListening ? 'Stop listening' : 'Start listening'}
-                >
-                  {speech.isListening ? <Square className="h-7 w-7 fill-current" /> : <Mic className="h-8 w-8" style={{ color: theme.accentColor }} />}
-                </motion.button>
+                <div className="relative flex items-center justify-center">
+                  {speech.isListening && (
+                    <motion.div
+                      animate={{ scale: [1, 1.35, 1], opacity: [0.6, 0, 0.6] }}
+                      transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+                      className="absolute inset-0 rounded-full pointer-events-none"
+                      style={{ backgroundColor: `${theme.accentColor}40` }}
+                    />
+                  )}
+                  <motion.button
+                    whileTap={{ scale: 0.92 }}
+                    whileHover={{ scale: 1.04 }}
+                    onClick={speech.isListening ? speech.stopListening : speech.startListening}
+                    disabled={!speech.isSupported}
+                    className={`relative z-10 grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-full border transition-all duration-300 ${
+                      speech.isListening
+                        ? 'text-white shadow-2xl'
+                        : 'border-white/10 bg-zinc-900/90 text-zinc-300 shadow-lg shadow-black/50 backdrop-blur-md hover:border-zinc-700 hover:bg-zinc-800/90'
+                    } disabled:opacity-40`}
+                    style={
+                      speech.isListening
+                        ? {
+                            backgroundColor: theme.accentColor,
+                            borderColor: theme.accentColor,
+                            boxShadow: `0 0 40px ${theme.accentColor}80`,
+                          }
+                        : {}
+                    }
+                    aria-label={speech.isListening ? 'Stop listening' : 'Start listening'}
+                  >
+                    {speech.isListening ? (
+                      <Square className="h-6 w-6 sm:h-7 sm:w-7 fill-current" />
+                    ) : (
+                      <Mic className="h-7 w-7 sm:h-8 sm:w-8" style={{ color: theme.accentColor }} />
+                    )}
+                  </motion.button>
+                </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-2.5">
                   <button
