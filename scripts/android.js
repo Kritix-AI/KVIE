@@ -94,7 +94,15 @@ const { run, logError } = require('@tauri-apps/cli/main.js')
 try {
   await run(['android', ...args], 'tauri')
 } catch (err) {
-  if (logError) logError(err)
-  else console.error(err)
+  if (err && typeof err === 'object' && err.message) {
+    console.error('[KVIE Android Engine Error]:', err.message)
+  } else {
+    try {
+      if (logError) logError(String(err?.message || err))
+      else console.error(err)
+    } catch {
+      console.error(err)
+    }
+  }
   process.exit(1)
 }
