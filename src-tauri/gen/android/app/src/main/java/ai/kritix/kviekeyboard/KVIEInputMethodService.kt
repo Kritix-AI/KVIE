@@ -113,17 +113,36 @@ class KVIEInputMethodService : InputMethodService() {
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             putExtra("android.speech.extra.DICTATION_MODE", true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: android.os.Bundle?) {
                 statusText.text = "Listening... Speak now"
+            }
+
+            override fun onBeginningOfSpeech() {
+                statusText.text = "Hearing your voice..."
+            }
+
+            override fun onRmsChanged(rmsdB: Float) {
+                if (rmsdB > 2.0f && statusText.text.contains("Listening")) {
+                    statusText.text = "Listening 🎙️..."
+                }
+            }
+
+            override fun onBufferReceived(buffer: ByteArray?) {}
+
+            override fun onEndOfSpeech() {
+                statusText.text = "Transcribing & cleaning..."
             }
 
             override fun onResults(results: android.os.Bundle?) {
@@ -140,10 +159,10 @@ class KVIEInputMethodService : InputMethodService() {
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission required"
                     SpeechRecognizer.ERROR_NETWORK -> "Network required for speech"
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected — speak louder"
                     SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Busy — please tap mic again"
                     SpeechRecognizer.ERROR_SERVER -> "Speech server error"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
                     else -> "Speech recognition error ($error)"
                 }
                 statusText.text = errorMsg
@@ -158,14 +177,6 @@ class KVIEInputMethodService : InputMethodService() {
                 }
             }
 
-            override fun onBeginningOfSpeech() {
-                statusText.text = "Listening..."
-            }
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                statusText.text = "Processing speech..."
-            }
             override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
         })
 
@@ -191,7 +202,7 @@ class KVIEInputMethodService : InputMethodService() {
 
     private fun handleFinalTranscript(rawTranscript: String) {
         if (rawTranscript.isBlank()) {
-            statusText.text = "Didn't catch that — try again"
+            statusText.text = "Didn't catch that — tap mic to retry"
             return
         }
 
@@ -200,14 +211,16 @@ class KVIEInputMethodService : InputMethodService() {
 
         // Commit text immediately into whatever active field is focused
         commitTextToField(stage1)
-        statusText.text = "Tap the mic and speak"
+        statusText.text = "Ready (Tap mic to speak)"
 
         // Stage 2: Background refinement pass
         scope.launch {
-            val refined = AutoEditClient.refine(stage1)
-            if (refined != null && refined != stage1) {
-                replaceLastCommittedText(stage1, refined)
-            }
+            try {
+                val refined = AutoEditClient.refine(stage1)
+                if (refined != null && refined.isNotBlank() && refined != stage1) {
+                    replaceLastCommittedText(stage1 + " ", refined + " ")
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -221,7 +234,10 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun commitTextToField(text: String) {
-        currentInputConnection?.commitText(text, 1)
+        val ic = currentInputConnection
+        if (ic != null) {
+            ic.commitText(text + " ", 1)
+        }
     }
 
     private fun replaceLastCommittedText(old: String, new: String) {
