@@ -37,6 +37,7 @@ import {
   Volume2,
   CheckCircle,
   AlertCircle,
+  X,
 } from 'lucide-react'
 import { listen } from '@tauri-apps/api/event'
 import { useKvieDocument } from './hooks/useKvieDocument'
@@ -270,12 +271,15 @@ export function App() {
   const [targetLanguage, setTargetLanguage] = useState('en')
   const [isPolishing, setIsPolishing] = useState(false)
 
+  const [isKeyboardBannerDismissed, setIsKeyboardBannerDismissed] = useState(false)
+
   const lastCommittedRef = useRef<string>('')
 
   useEffect(() => {
     const isAndroidEnv = isAndroid()
     setIsAndroidDevice(isAndroidEnv)
     setIsKeyboardEnabledState(isAndroidKeyboardEnabled())
+    setIsKeyboardBannerDismissed(localStorage.getItem('kvie_dismissed_keyboard_banner') === 'true')
 
     if (isAndroidEnv) {
       const activeAndroidEngine = getSelectedAndroidEngine()
@@ -792,28 +796,48 @@ export function App() {
           {/* ──────────────── TAB VIEW 1: WORKSPACE ──────────────── */}
           {activeNav === 'Workspace' && (
             <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-between py-2 sm:py-6 pb-28 md:pb-0">
-              {/* Android Keyboard Quick Banner (If on mobile) */}
-              <div
-                onClick={() => setActiveNav('Voice IME')}
-                className="cursor-pointer mb-4 flex items-center justify-between gap-3 rounded-2xl border bg-panel/70 p-3.5 sm:p-4 backdrop-blur-md transition hover:bg-panel"
-                style={{ borderColor: `${theme.accentColor}50` }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="rounded-xl p-2.5 bg-zinc-900 border border-line" style={{ color: theme.accentColor }}>
-                    <Keyboard className="h-5 w-5" />
+              {/* Android Keyboard Setup Prompt (Only shown for new users until keyboard is enabled/setup) */}
+              {isAndroidDevice && !isKeyboardEnabledState && !isKeyboardBannerDismissed && (
+                <div
+                  className="mb-4 flex items-center justify-between gap-3 rounded-2xl border bg-panel/70 p-3.5 sm:p-4 backdrop-blur-md transition hover:bg-panel"
+                  style={{ borderColor: `${theme.accentColor}50` }}
+                >
+                  <div
+                    onClick={() => setActiveNav('Voice IME')}
+                    className="flex-1 flex items-center gap-3 cursor-pointer"
+                  >
+                    <div className="rounded-xl p-2.5 bg-zinc-900 border border-line shrink-0" style={{ color: theme.accentColor }}>
+                      <Keyboard className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-zinc-100">
+                        Setup KVIE Voice Keyboard
+                      </p>
+                      <p className="text-[11px] text-zinc-400">Speak into WhatsApp, Chrome, Notes & any Android app without floating overlays.</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5">
-                      KVIE System-Wide Voice Keyboard
-                      <span className="rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 border border-emerald-500/30">Android Ready</span>
-                    </p>
-                    <p className="text-[11px] text-zinc-400">Speak into WhatsApp, Chrome, Notes & any Android app without floating overlays.</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveNav('Voice IME')}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-xl text-black shrink-0 flex items-center gap-1"
+                      style={{ backgroundColor: theme.accentColor }}
+                    >
+                      Setup <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setIsKeyboardBannerDismissed(true)
+                        localStorage.setItem('kvie_dismissed_keyboard_banner', 'true')
+                      }}
+                      className="p-1 text-zinc-500 hover:text-zinc-300 rounded-lg"
+                      title="Dismiss"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
-                <span className="text-xs font-medium shrink-0 flex items-center gap-1" style={{ color: theme.accentColor }}>
-                  Setup <ExternalLink className="h-3.5 w-3.5" />
-                </span>
-              </div>
+              )}
 
               {/* Header Details */}
               <div className="mb-4 flex items-end justify-between gap-4">
