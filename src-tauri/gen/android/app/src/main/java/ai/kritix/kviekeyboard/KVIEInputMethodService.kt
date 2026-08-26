@@ -392,12 +392,82 @@ class KVIEInputMethodService : InputMethodService() {
         }
     }
 
-    private fun startSystemSpeechRecognizer() {
+    private fun initSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            return
+        }
         try {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+            setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: android.os.Bundle?) {
+                    statusText.text = "Listening... Speak now"
+                }
+
+                override fun onBeginningOfSpeech() {
+                    statusText.text = "Hearing your voice..."
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {
+                    if (rmsdB > 2.0f && statusText.text.contains("Listening")) {
+                        statusText.text = "Listening 🎙️..."
+                    }
+                }
+
+                override fun onBufferReceived(buffer: ByteArray?) {}
+
+                override fun onEndOfSpeech() {
+                    statusText.text = "Transcribing & cleaning..."
+                }
+
+                override fun onResults(results: android.os.Bundle?) {
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val transcript = matches?.firstOrNull().orEmpty()
+                    handleFinalTranscript(transcript)
+                    stopListening()
+                }
+
+                override fun onError(error: Int) {
+                    val errorMsg = when (error) {
+                        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+                        SpeechRecognizer.ERROR_CLIENT -> "Client error (tap again)"
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission required"
+                        SpeechRecognizer.ERROR_NETWORK -> "Network required for speech"
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+                        SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Busy — tap mic again"
+                        SpeechRecognizer.ERROR_SERVER -> "Speech server error"
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
+                        else -> "Speech recognition error ($error)"
+                    }
+                    statusText.text = errorMsg
+                    stopListening()
+                }
+
+                override fun onPartialResults(partialResults: android.os.Bundle?) {
+                    val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val interim = matches?.firstOrNull().orEmpty()
+                    if (interim.isNotBlank()) {
+                        statusText.text = interim
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+            })
+        }
+    }
+
+    private fun startSystemSpeechRecognizer() {
+        if (speechRecognizer == null) {
+            initSpeechRecognizer()
+        }
+
+        if (speechRecognizer == null) {
+            statusText.text = "Speech recognizer unavailable"
+            return
+        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -411,62 +481,6 @@ class KVIEInputMethodService : InputMethodService() {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
         }
-
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: android.os.Bundle?) {
-                statusText.text = "Listening... Speak now"
-            }
-
-            override fun onBeginningOfSpeech() {
-                statusText.text = "Hearing your voice..."
-            }
-
-            override fun onRmsChanged(rmsdB: Float) {
-                if (rmsdB > 2.0f && statusText.text.contains("Listening")) {
-                    statusText.text = "Listening 🎙️..."
-                }
-            }
-
-            override fun onBufferReceived(buffer: ByteArray?) {}
-
-            override fun onEndOfSpeech() {
-                statusText.text = "Transcribing & cleaning..."
-            }
-
-            override fun onResults(results: android.os.Bundle?) {
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val transcript = matches?.firstOrNull().orEmpty()
-                handleFinalTranscript(transcript)
-                stopListening()
-            }
-
-            override fun onError(error: Int) {
-                val errorMsg = when (error) {
-                    SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-                    SpeechRecognizer.ERROR_CLIENT -> "Client error (tap again)"
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission required"
-                    SpeechRecognizer.ERROR_NETWORK -> "Network required for speech"
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Busy — tap mic again"
-                    SpeechRecognizer.ERROR_SERVER -> "Speech server error"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
-                    else -> "Speech recognition error ($error)"
-                }
-                statusText.text = errorMsg
-                stopListening()
-            }
-
-            override fun onPartialResults(partialResults: android.os.Bundle?) {
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val interim = matches?.firstOrNull().orEmpty()
-                if (interim.isNotBlank()) {
-                    statusText.text = interim
-                }
-            }
-
-            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-        })
 
         try {
             speechRecognizer?.startListening(intent)
@@ -482,7 +496,7 @@ class KVIEInputMethodService : InputMethodService() {
         engineJob?.cancel()
         whisperEngine?.stopRecording()
         try {
-            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
         } catch (_: Exception) {}
         isListening = false
         micButton.isSelected = false
