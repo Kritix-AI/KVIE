@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -27,9 +29,26 @@ class MainActivity : TauriActivity() {
     }
   }
 
-  override fun onWebViewCreated(webView: WebView) {
-    super.onWebViewCreated(webView)
-    webView.addJavascriptInterface(AndroidBridge(this), "AndroidKeyboardBridge")
+  override fun onPostCreate(savedInstanceState: Bundle?) {
+    super.onPostCreate(savedInstanceState)
+    attachBridgeToWebView(window.decorView)
+  }
+
+  override fun onResume() {
+    super.onResume()
+    attachBridgeToWebView(window.decorView)
+  }
+
+  private fun attachBridgeToWebView(root: View) {
+    if (root is WebView) {
+      root.addJavascriptInterface(AndroidBridge(this), "AndroidKeyboardBridge")
+      return
+    }
+    if (root is ViewGroup) {
+      for (i in 0 until root.childCount) {
+        attachBridgeToWebView(root.getChildAt(i))
+      }
+    }
   }
 
   class AndroidBridge(private val activity: MainActivity) {
