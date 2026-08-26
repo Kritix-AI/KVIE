@@ -1,40 +1,218 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/keyboardRoot"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:background="#121214"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
-    android:paddingTop="12dp"
-    android:paddingBottom="16dp">
+    android:orientation="vertical"
+    android:background="#121216"
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="8dp">
 
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:text="Tap the mic and speak"
-        android:textColor="#D7FB52"
-        android:textStyle="bold"
-        android:textSize="14sp" />
-
-    <ImageButton
-        android:id="@+id/micButton"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="@drawable/mic_button_bg"
-        android:contentDescription="Start dictation"
-        android:src="@android:drawable/ic_btn_speak_now" />
-
-    <ImageButton
-        android:id="@+id/switchKeyboardButton"
-        android:layout_width="44dp"
+    <!-- ───────────── TOP AI VOICE TOOLBAR ───────────── -->
+    <LinearLayout
+        android:id="@+id/voiceToolbar"
+        android:layout_width="match_parent"
         android:layout_height="44dp"
-        android:layout_marginStart="10dp"
-        android:background="?android:attr/selectableItemBackgroundBorderless"
-        android:contentDescription="Switch keyboard"
-        android:src="@android:drawable/ic_menu_more" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#19191F"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:layout_marginBottom="6dp"
+        android:clipToOutline="true">
+
+        <!-- Voice Mic Button -->
+        <ImageButton
+            android:id="@+id/micButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/mic_toolbar_btn_bg"
+            android:contentDescription="Voice dictation"
+            android:src="@android:drawable/ic_btn_speak_now"
+            android:scaleType="centerInside"
+            android:padding="6dp" />
+
+        <!-- Status & Live Audio Waveform Text -->
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:singleLine="true"
+            android:ellipsize="marquee"
+            android:text="KVIE AI Voice (Tap mic)"
+            android:textColor="#D7FB52"
+            android:textStyle="bold"
+            android:textSize="12.5sp" />
+
+        <!-- SmolLM2 AI Polish Button -->
+        <Button
+            android:id="@+id/polishButton"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:background="@drawable/key_special_bg"
+            android:text="✨ Polish"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- Switch IME Globe Button -->
+        <ImageButton
+            android:id="@+id/switchKeyboardButton"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Switch input method"
+            android:src="@android:drawable/ic_menu_more"
+            android:scaleType="centerInside"
+            android:padding="4dp" />
+    </LinearLayout>
+
+    <!-- ───────────── QWERTY KEYBOARD CONTAINER ───────────── -->
+    <LinearLayout
+        android:id="@+id/qwertyContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- ROW 1: Q W E R T Y U I O P -->
+        <LinearLayout
+            android:id="@+id/row1"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="4dp" />
+
+        <!-- ROW 2: A S D F G H J K L -->
+        <LinearLayout
+            android:id="@+id/row2"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="4dp" />
+
+        <!-- ROW 3: [SHIFT] Z X C V B N M [BACKSPACE] -->
+        <LinearLayout
+            android:id="@+id/row3"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="4dp">
+
+            <Button
+                android:id="@+id/keyShift"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.4"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_special_bg"
+                android:text="⇧"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp" />
+
+            <LinearLayout
+                android:id="@+id/row3Letters"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="7"
+                android:orientation="horizontal"
+                android:gravity="center" />
+
+            <Button
+                android:id="@+id/keyBackspace"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.4"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_special_bg"
+                android:text="⌫"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <!-- ROW 4: [?123] [,] [ SPACE (KVIE) ] [.] [ENTER ↵] -->
+        <LinearLayout
+            android:id="@+id/row4"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/keySymbols"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.5"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_special_bg"
+                android:text="\?123"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/keyComma"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_bg"
+                android:text=","
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/keySpace"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="4.5"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_bg"
+                android:text="KVIE"
+                android:textColor="#8E8E98"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/keyDot"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_bg"
+                android:text="."
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/keyEnter"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.6"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/key_accent_bg"
+                android:text="↵"
+                android:textColor="#121214"
+                android:textStyle="bold"
+                android:textSize="18sp" />
+        </LinearLayout>
+    </LinearLayout>
 
 </LinearLayout>
