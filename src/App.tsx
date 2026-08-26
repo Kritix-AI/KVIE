@@ -1472,10 +1472,17 @@ export function App() {
                   </div>
                   <button
                     onClick={handleToggleGrammarRouter}
-                    className={`h-6 w-11 rounded-full p-1 transition ${isGrammarRouterEnabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-1 transition-colors duration-200 ease-in-out focus:outline-none touch-manipulation ${
+                      isGrammarRouterEnabled ? 'bg-cyan-500' : 'bg-zinc-700/90 hover:bg-zinc-700'
+                    }`}
                     style={isGrammarRouterEnabled ? { backgroundColor: theme.accentColor } : {}}
+                    aria-label="Toggle Multi-Tier Grammar Router"
                   >
-                    <div className={`h-4 w-4 rounded-full bg-white transition ${isGrammarRouterEnabled ? 'translate-x-5' : ''}`} />
+                    <div
+                      className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
+                        isGrammarRouterEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
                   </button>
                 </div>
 
@@ -1553,10 +1560,17 @@ export function App() {
                   </div>
                   <button
                     onClick={handleToggleTranslation}
-                    className={`h-6 w-11 rounded-full p-1 transition ${isTranslationEnabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-1 transition-colors duration-200 ease-in-out focus:outline-none touch-manipulation ${
+                      isTranslationEnabled ? 'bg-cyan-500' : 'bg-zinc-700/90 hover:bg-zinc-700'
+                    }`}
                     style={isTranslationEnabled ? { backgroundColor: theme.accentColor } : {}}
+                    aria-label="Toggle Live Voice Translation"
                   >
-                    <div className={`h-4 w-4 rounded-full bg-white transition ${isTranslationEnabled ? 'translate-x-5' : ''}`} />
+                    <div
+                      className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
+                        isTranslationEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
                   </button>
                 </div>
 
@@ -1639,10 +1653,17 @@ export function App() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleToggleSnippet(snippet.id)}
-                          className={`h-5 w-9 rounded-full p-0.5 transition ${snippet.enabled ? 'bg-cyan-500' : 'bg-zinc-800'}`}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none touch-manipulation ${
+                            snippet.enabled ? 'bg-cyan-500' : 'bg-zinc-700/90 hover:bg-zinc-700'
+                          }`}
                           style={snippet.enabled ? { backgroundColor: theme.accentColor } : {}}
+                          aria-label="Toggle Voice Snippet"
                         >
-                          <div className={`h-4 w-4 rounded-full bg-white transition ${snippet.enabled ? 'translate-x-4' : ''}`} />
+                          <div
+                            className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
+                              snippet.enabled ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
                         </button>
                         <button
                           onClick={() => handleDeleteSnippet(snippet.id)}
