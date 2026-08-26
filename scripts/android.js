@@ -92,18 +92,25 @@ try {
   const { execSync } = require('child_process')
   const adbPath = path.join(process.env.ANDROID_HOME || '', 'platform-tools', isWindows ? 'adb.exe' : 'adb')
   if (fs.existsSync(adbPath)) {
+    execSync(`"${adbPath}" reverse tcp:5173 tcp:5173`, { stdio: 'ignore' })
+    execSync(`"${adbPath}" reverse tcp:5183 tcp:5183`, { stdio: 'ignore' })
     execSync(`"${adbPath}" reverse tcp:8765 tcp:8765`, { stdio: 'ignore' })
     execSync(`"${adbPath}" reverse tcp:1420 tcp:1420`, { stdio: 'ignore' })
-    console.log(`[KVIE Android Engine] Port reverse proxy active: Phone (127.0.0.1:8765) -> PC Python / LLM Backend`)
+    console.log(`[KVIE Android Engine] Port reverse proxy active: Phone (127.0.0.1:5173, 127.0.0.1:8765) -> PC Backend`)
   }
 } catch {}
 
-console.log(`[KVIE Android Engine] Executing Tauri Android: ${args.join(' ')}\n`)
+const tauriArgs = [...args]
+if (tauriArgs.includes('dev') && !tauriArgs.includes('--host')) {
+  tauriArgs.push('--host', '127.0.0.1')
+}
+
+console.log(`[KVIE Android Engine] Executing Tauri Android: ${tauriArgs.join(' ')}\n`)
 
 const { run, logError } = require('@tauri-apps/cli/main.js')
 
 try {
-  await run(['android', ...args], 'tauri')
+  await run(['android', ...tauriArgs], 'tauri')
 } catch (err) {
   if (err && typeof err === 'object' && err.message) {
     console.error('[KVIE Android Engine Error]:', err.message)
