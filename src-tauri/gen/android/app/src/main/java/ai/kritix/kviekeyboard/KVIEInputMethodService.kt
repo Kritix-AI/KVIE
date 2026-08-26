@@ -43,6 +43,7 @@ class KVIEInputMethodService : InputMethodService() {
     private var isShifted = false
     private var isCapsLock = false
     private var isSymbolsMode = false
+    private var isSymbolsSecondaryPage = false
 
     private lateinit var statusText: TextView
     private lateinit var micButton: ImageButton
@@ -64,8 +65,12 @@ class KVIEInputMethodService : InputMethodService() {
     private val alphabetKeysRow3 = listOf("z", "x", "c", "v", "b", "n", "m")
 
     private val symbolKeysRow1 = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
-    private val symbolKeysRow2 = listOf("@", "#", "$", "_", "&", "-", "+", "(", ")")
+    private val symbolKeysRow2 = listOf("@", "#", "$", "_", "&", "-", "+", "(", ")", "/")
     private val symbolKeysRow3 = listOf("*", "\"", "'", ":", ";", "!", "?")
+
+    private val symbolPage2Row1 = listOf("~", "\\", "|", "<", ">", "{", "}", "[", "]", "%")
+    private val symbolPage2Row2 = listOf("^", "=", "°", "•", "¥", "€", "£", "¢", "₱", "©")
+    private val symbolPage2Row3 = listOf("®", "™", "✓", "§", "¶", "¿", "¡")
 
     private val currentKeyButtons = mutableListOf<TextView>()
     private val scope = CoroutineScope(Dispatchers.Main)
@@ -166,9 +171,21 @@ class KVIEInputMethodService : InputMethodService() {
         row3Letters.removeAllViews()
         currentKeyButtons.clear()
 
-        val r1 = if (isSymbolsMode) symbolKeysRow1 else alphabetKeysRow1
-        val r2 = if (isSymbolsMode) symbolKeysRow2 else alphabetKeysRow2
-        val r3 = if (isSymbolsMode) symbolKeysRow3 else alphabetKeysRow3
+        val r1 = when {
+            isSymbolsMode && isSymbolsSecondaryPage -> symbolPage2Row1
+            isSymbolsMode -> symbolKeysRow1
+            else -> alphabetKeysRow1
+        }
+        val r2 = when {
+            isSymbolsMode && isSymbolsSecondaryPage -> symbolPage2Row2
+            isSymbolsMode -> symbolKeysRow2
+            else -> alphabetKeysRow2
+        }
+        val r3 = when {
+            isSymbolsMode && isSymbolsSecondaryPage -> symbolPage2Row3
+            isSymbolsMode -> symbolKeysRow3
+            else -> alphabetKeysRow3
+        }
 
         for (char in r1) {
             val btn = createKeyButton(char)
@@ -237,12 +254,13 @@ class KVIEInputMethodService : InputMethodService() {
         }
 
         keyShift.text = when {
+            isSymbolsMode && isSymbolsSecondaryPage -> "2/2"
             isSymbolsMode -> "1/2"
             isCapsLock -> "⇪"
             isShifted -> "⇧"
             else -> "⇧"
         }
-        keyShift.isSelected = isShifted || isCapsLock
+        keyShift.isSelected = isShifted || isCapsLock || (isSymbolsMode && isSymbolsSecondaryPage)
         keySymbols.text = if (isSymbolsMode) "ABC" else "?123"
         keyDot.text = if (isSymbolsMode) "/" else "."
         keyComma.text = if (isSymbolsMode) "=" else ","
@@ -250,7 +268,9 @@ class KVIEInputMethodService : InputMethodService() {
 
     private fun toggleShift() {
         if (isSymbolsMode) {
-            // Secondary symbol page toggle
+            // Toggle between symbol page 1 (1/2) and symbol page 2 (2/2)
+            isSymbolsSecondaryPage = !isSymbolsSecondaryPage
+            populateKeys()
             return
         }
         if (!isShifted && !isCapsLock) {
@@ -266,6 +286,7 @@ class KVIEInputMethodService : InputMethodService() {
 
     private fun toggleSymbolsMode() {
         isSymbolsMode = !isSymbolsMode
+        isSymbolsSecondaryPage = false
         isShifted = false
         isCapsLock = false
         populateKeys()
