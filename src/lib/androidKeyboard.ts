@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core'
+
 declare global {
   interface Window {
     AndroidKeyboardBridge?: {
@@ -17,28 +19,65 @@ export const isAndroid = (): boolean => {
   return /android/i.test(navigator.userAgent)
 }
 
-export const openAndroidKeyboardSettings = (): void => {
+export const openAndroidKeyboardSettings = async (): Promise<void> => {
+  // 1. Try Android Native Bridge
   if (window.AndroidKeyboardBridge?.openKeyboardSettings) {
-    window.AndroidKeyboardBridge.openKeyboardSettings()
-  } else {
-    console.warn('AndroidKeyboardBridge not available')
+    try {
+      window.AndroidKeyboardBridge.openKeyboardSettings()
+      return
+    } catch (e) {
+      console.warn('AndroidKeyboardBridge.openKeyboardSettings failed', e)
+    }
+  }
+
+  // 2. Try Tauri IPC Invoke
+  try {
+    await invoke('open_android_keyboard_settings')
+    return
+  } catch {}
+
+  // 3. Fallback to Android Intent URL
+  try {
+    window.location.href = 'intent:#Intent;action=android.settings.INPUT_METHOD_SETTINGS;end'
+  } catch (err) {
+    console.error('Failed to open keyboard settings via intent', err)
   }
 }
 
-export const showAndroidKeyboardPicker = (): void => {
+export const showAndroidKeyboardPicker = async (): Promise<void> => {
+  // 1. Try Android Native Bridge
   if (window.AndroidKeyboardBridge?.showKeyboardPicker) {
-    window.AndroidKeyboardBridge.showKeyboardPicker()
-  } else {
-    console.warn('AndroidKeyboardBridge not available')
+    try {
+      window.AndroidKeyboardBridge.showKeyboardPicker()
+      return
+    } catch (e) {
+      console.warn('AndroidKeyboardBridge.showKeyboardPicker failed', e)
+    }
   }
+
+  // 2. Try Tauri IPC Invoke
+  try {
+    await invoke('show_android_keyboard_picker')
+    return
+  } catch {}
 }
 
-export const requestAndroidMicPermission = (): void => {
+export const requestAndroidMicPermission = async (): Promise<void> => {
   if (window.AndroidKeyboardBridge?.requestMicPermission) {
-    window.AndroidKeyboardBridge.requestMicPermission()
-  } else {
-    navigator.mediaDevices?.getUserMedia?.({ audio: true }).catch(() => {})
+    try {
+      window.AndroidKeyboardBridge.requestMicPermission()
+      return
+    } catch (e) {
+      console.warn('AndroidKeyboardBridge.requestMicPermission failed', e)
+    }
   }
+
+  try {
+    await invoke('request_android_mic_permission')
+    return
+  } catch {}
+
+  navigator.mediaDevices?.getUserMedia?.({ audio: true }).catch(() => {})
 }
 
 export const isAndroidKeyboardEnabled = (): boolean => {
