@@ -49,8 +49,11 @@ pub struct ActiveAppInfo {
     pub process_name: String,
 }
 
+#[cfg(target_os = "windows")]
 static LAST_ACTIVE_APP: Mutex<Option<ActiveAppInfo>> = Mutex::new(None);
+#[cfg(target_os = "windows")]
 static APP_HANDLE_FOR_HOTKEY: Mutex<Option<tauri::AppHandle>> = Mutex::new(None);
+#[cfg(target_os = "windows")]
 static IS_HOTKEY_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Deserialize)]
@@ -260,97 +263,92 @@ fn toggle_floating_mic(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn inspect_window_app(_hwnd: isize) -> Option<ActiveAppInfo> {
-    #[cfg(target_os = "windows")]
-    {
-        let hwnd = _hwnd;
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_QUERY_INFORMATION};
-        use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::ProcessStatus::{K32GetModuleBaseNameW, K32GetProcessImageFileNameW};
+#[cfg(target_os = "windows")]
+fn inspect_window_app(hwnd: isize) -> Option<ActiveAppInfo> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_QUERY_INFORMATION};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::{K32GetModuleBaseNameW, K32GetProcessImageFileNameW};
 
-        if hwnd == 0 {
-            return None;
+    if hwnd == 0 {
+        return None;
+    }
+
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd as _, &mut pid) };
+    if pid == 0 {
+        return None;
+    }
+
+    let mut process_name = String::new();
+    unsafe {
+        let mut handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
         }
-
-        let mut pid = 0u32;
-        unsafe { GetWindowThreadProcessId(hwnd as _, &mut pid) };
-        if pid == 0 {
-            return None;
-        }
-
-        let mut process_name = String::new();
-        unsafe {
-            let mut handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if handle == 0 {
-                handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
-            }
-            if handle != 0 {
-                let mut name_buf = [0u16; 512];
-                let name_len = K32GetModuleBaseNameW(handle, 0, name_buf.as_mut_ptr(), 512);
-                if name_len > 0 {
-                    process_name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
-                } else {
-                    let img_len = K32GetProcessImageFileNameW(handle, name_buf.as_mut_ptr(), 512);
-                    if img_len > 0 {
-                        let full_path = String::from_utf16_lossy(&name_buf[..img_len as usize]);
-                        if let Some(filename) = full_path.split('\\').last() {
-                            process_name = filename.to_string();
-                        }
+        if handle != 0 {
+            let mut name_buf = [0u16; 512];
+            let name_len = K32GetModuleBaseNameW(handle, 0, name_buf.as_mut_ptr(), 512);
+            if name_len > 0 {
+                process_name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+            } else {
+                let img_len = K32GetProcessImageFileNameW(handle, name_buf.as_mut_ptr(), 512);
+                if img_len > 0 {
+                    let full_path = String::from_utf16_lossy(&name_buf[..img_len as usize]);
+                    if let Some(filename) = full_path.split('\\').last() {
+                        process_name = filename.to_string();
                     }
                 }
-                CloseHandle(handle);
             }
+            CloseHandle(handle);
         }
-
-        let proc_lower = process_name.to_lowercase();
-        if proc_lower.is_empty() {
-            return None;
-        }
-
-        let mut title_buf = [0u16; 512];
-        let len = unsafe { GetWindowTextW(hwnd as _, title_buf.as_mut_ptr(), 512) };
-        let title = if len > 0 {
-            String::from_utf16_lossy(&title_buf[..len as usize])
-        } else {
-            String::new()
-        };
-
-        let friendly_name = if proc_lower.contains("whatsapp") {
-            "WhatsApp Desktop".to_string()
-        } else if proc_lower.contains("notepad") {
-            "Notepad".to_string()
-        } else if proc_lower.contains("chrome") {
-            "Google Chrome".to_string()
-        } else if proc_lower.contains("code") {
-            "Visual Studio Code".to_string()
-        } else if proc_lower.contains("word") || proc_lower.contains("winword") {
-            "Microsoft Word".to_string()
-        } else if proc_lower.contains("discord") {
-            "Discord".to_string()
-        } else if proc_lower.contains("slack") {
-            "Slack".to_string()
-        } else if proc_lower.contains("edge") || proc_lower.contains("msedge") {
-            "Microsoft Edge".to_string()
-        } else if !title.is_empty() && !proc_lower.contains("kritix") {
-            title.clone()
-        } else {
-            let base = process_name.replace(".exe", "");
-            let mut c = base.chars();
-            match c.next() {
-                None => String::new(),
-                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-            }
-        };
-
-        Some(ActiveAppInfo {
-            app_name: friendly_name,
-            process_name,
-        })
     }
-    #[cfg(not(target_os = "windows"))]
-    None
+
+    let proc_lower = process_name.to_lowercase();
+    if proc_lower.is_empty() {
+        return None;
+    }
+
+    let mut title_buf = [0u16; 512];
+    let len = unsafe { GetWindowTextW(hwnd as _, title_buf.as_mut_ptr(), 512) };
+    let title = if len > 0 {
+        String::from_utf16_lossy(&title_buf[..len as usize])
+    } else {
+        String::new()
+    };
+
+    let friendly_name = if proc_lower.contains("whatsapp") {
+        "WhatsApp Desktop".to_string()
+    } else if proc_lower.contains("notepad") {
+        "Notepad".to_string()
+    } else if proc_lower.contains("chrome") {
+        "Google Chrome".to_string()
+    } else if proc_lower.contains("code") {
+        "Visual Studio Code".to_string()
+    } else if proc_lower.contains("word") || proc_lower.contains("winword") {
+        "Microsoft Word".to_string()
+    } else if proc_lower.contains("discord") {
+        "Discord".to_string()
+    } else if proc_lower.contains("slack") {
+        "Slack".to_string()
+    } else if proc_lower.contains("edge") || proc_lower.contains("msedge") {
+        "Microsoft Edge".to_string()
+    } else if !title.is_empty() && !proc_lower.contains("kritix") {
+        title.clone()
+    } else {
+        let base = process_name.replace(".exe", "");
+        let mut c = base.chars();
+        match c.next() {
+            None => String::new(),
+            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        }
+    };
+
+    Some(ActiveAppInfo {
+        app_name: friendly_name,
+        process_name,
+    })
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -407,9 +405,12 @@ fn extract_focused_surrounding_text() -> String {
 
 #[tauri::command]
 fn get_active_app_info() -> Result<ActiveAppInfo, String> {
-    if let Ok(guard) = LAST_ACTIVE_APP.lock() {
-        if let Some(app) = guard.clone() {
-            return Ok(app);
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(guard) = LAST_ACTIVE_APP.lock() {
+            if let Some(app) = guard.clone() {
+                return Ok(app);
+            }
         }
     }
     Ok(ActiveAppInfo {
@@ -420,15 +421,21 @@ fn get_active_app_info() -> Result<ActiveAppInfo, String> {
 
 #[tauri::command]
 fn get_active_app_context() -> Result<ActiveAppContext, String> {
-    let mut app_name = "Active App".to_string();
-    let mut process_name = "app.exe".to_string();
-
-    if let Ok(guard) = LAST_ACTIVE_APP.lock() {
-        if let Some(app) = guard.clone() {
-            app_name = app.app_name;
-            process_name = app.process_name;
+    #[cfg(target_os = "windows")]
+    let (app_name, process_name) = {
+        if let Ok(guard) = LAST_ACTIVE_APP.lock() {
+            if let Some(app) = guard.clone() {
+                (app.app_name, app.process_name)
+            } else {
+                ("Active App".to_string(), "app.exe".to_string())
+            }
+        } else {
+            ("Active App".to_string(), "app.exe".to_string())
         }
-    }
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let (app_name, process_name) = ("Active App".to_string(), "app.exe".to_string());
 
     let surrounding_text = extract_focused_surrounding_text();
 
@@ -448,32 +455,31 @@ fn snapshot(document: &DocumentState) -> DocumentSnapshot {
     DocumentSnapshot { text: document.text.clone(), cursor: document.cursor, version: document.version, can_undo: !document.undo.is_empty(), can_redo: !document.redo.is_empty() }
 }
 
+#[cfg(target_os = "windows")]
 fn start_active_app_tracker() {
-    #[cfg(target_os = "windows")]
-    {
-        std::thread::spawn(|| {
-            use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    std::thread::spawn(|| {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
-            loop {
-                unsafe {
-                    let hwnd = GetForegroundWindow();
-                    if hwnd != 0 {
-                        if let Some(info) = inspect_window_app(hwnd as isize) {
-                            let proc_lower = info.process_name.to_lowercase();
-                            if !proc_lower.contains("kritix") {
-                                if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
-                                    *guard = Some(info);
-                                }
+        loop {
+            unsafe {
+                let hwnd = GetForegroundWindow();
+                if hwnd != 0 {
+                    if let Some(info) = inspect_window_app(hwnd as isize) {
+                        let proc_lower = info.process_name.to_lowercase();
+                        if !proc_lower.contains("kritix") {
+                            if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
+                                *guard = Some(info);
                             }
                         }
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(150));
             }
-        });
-    }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    });
 }
 
+#[cfg(target_os = "windows")]
 fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
     if let Ok(mut guard) = APP_HANDLE_FOR_HOTKEY.lock() {
         *guard = Some(app_handle);
@@ -714,6 +720,7 @@ ModelManager.download_model_stream("{}", on_progress)
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
     start_active_app_tracker();
     start_python_service();
 
@@ -725,6 +732,7 @@ pub fn run() {
             initialize_database(&db_path)?;
             let document = load_document(&db_path)?;
             app.manage(KvieState { document: Mutex::new(document), db_path });
+            #[cfg(target_os = "windows")]
             start_global_hotkey_listener(app.handle().clone());
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             setup_system_tray(app)?;
