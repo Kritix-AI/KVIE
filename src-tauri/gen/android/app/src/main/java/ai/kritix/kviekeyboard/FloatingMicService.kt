@@ -265,8 +265,11 @@ class FloatingMicService : Service() {
     private fun handleFinalTranscript(raw: String) {
         if (raw.isBlank()) return
 
+        val stripped = SmolLMEngine.stripFillersAndPunctuate(raw)
+        if (stripped.isBlank()) return
+
         scope.launch {
-            val polished = AutoEditClient.refine(raw, this@FloatingMicService) ?: raw
+            val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
             // Copy polished text to system clipboard for immediate pasting into active field
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = ClipData.newPlainText("KVIE Voice", polished)

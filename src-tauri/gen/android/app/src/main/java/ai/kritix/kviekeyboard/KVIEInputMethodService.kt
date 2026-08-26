@@ -603,19 +603,25 @@ class KVIEInputMethodService : InputMethodService() {
             return
         }
 
-        // Commit text immediately into whatever active field is focused
         val ic = currentInputConnection ?: return
+
+        // 1. Instant Filler-Word Stripping & Punctuation Cleanup BEFORE text hits the active input field
+        val cleanText = SmolLMEngine.stripFillersAndPunctuate(rawTranscript)
+        if (cleanText.isBlank()) {
+            statusText.text = "Ready (Tap mic or type)"
+            return
+        }
+
         val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
-        val stage1 = rawTranscript.trim()
-        ic.commitText(prefix + stage1 + " ", 1)
+        ic.commitText(prefix + cleanText + " ", 1)
         statusText.text = "Ready (Tap mic or type)"
 
-        // Background SmolLM2 AutoEdit refinement pass
+        // 2. Background SmolLM2 AutoEdit refinement pass
         scope.launch {
             try {
-                val refined = AutoEditClient.refine(stage1, this@KVIEInputMethodService)
-                if (refined != null && refined.isNotBlank() && refined != stage1) {
-                    val oldLen = stage1.length + 1
+                val refined = AutoEditClient.refine(cleanText, this@KVIEInputMethodService)
+                if (refined != null && refined.isNotBlank() && refined != cleanText) {
+                    val oldLen = cleanText.length + 1
                     ic.deleteSurroundingText(oldLen, 0)
                     ic.commitText(prefix + refined + " ", 1)
                 }

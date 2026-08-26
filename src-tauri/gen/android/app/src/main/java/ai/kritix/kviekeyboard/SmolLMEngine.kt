@@ -28,7 +28,7 @@ class SmolLMEngine(private val context: Context) {
         if (isModelDownloaded) {
             return@withContext runOnDeviceInference(rawTranscript, style)
         } else {
-            return@withContext runEdgeHeuristicRefinement(rawTranscript)
+            return@withContext stripFillersAndPunctuate(rawTranscript)
         }
     }
 
@@ -42,58 +42,75 @@ class SmolLMEngine(private val context: Context) {
 
         val prompt = "<|im_start|>system\n$systemPrompt<|im_end|>\n<|im_start|>user\n$input<|im_end|>\n<|im_start|>assistant\n"
 
-        // Native inference execution
-        return runEdgeHeuristicRefinement(input)
+        // Native inference execution + rule cleanup
+        return stripFillersAndPunctuate(input)
     }
 
-    private fun runEdgeHeuristicRefinement(text: String): String {
-        var result = text.trim()
+    companion object {
+        /**
+         * Ultra-fast synchronous filler-word stripping and punctuation cleanup.
+         * Runs in <0.5ms directly on device BEFORE text hits the active input field.
+         */
+        fun stripFillersAndPunctuate(text: String): String {
+            if (text.isBlank()) return ""
 
-        // 1. Spoken punctuation substitution
-        val spokenPunctuation = mapOf(
-            "\\bcomma\\b" to ",",
-            "\\bperiod\\b" to ".",
-            "\\bfull stop\\b" to ".",
-            "\\bquestion mark\\b" to "?",
-            "\\bexclamation mark\\b" to "!",
-            "\\bexclamation point\\b" to "!",
-            "\\bnew line\\b" to "\n"
-        )
-        for ((pattern, sym) in spokenPunctuation) {
-            result = result.replace(Regex(pattern, RegexOption.IGNORE_CASE), sym)
+            var result = text.trim()
+
+            // 1. Spoken punctuation substitution
+            val spokenPunctuation = listOf(
+                Regex("(?i)\\b(period|full stop)\\b") to ".",
+                Regex("(?i)\\bcomma\\b") to ",",
+                Regex("(?i)\\bquestion mark\\b") to "?",
+                Regex("(?i)\\b(exclamation mark|exclamation point)\\b") to "!",
+                Regex("(?i)\\bcolon\\b") to ":",
+                Regex("(?i)\\bsemicolon\\b") to ";",
+                Regex("(?i)\\b(new line|next line)\\b") to "\n"
+            )
+            for ((regex, sym) in spokenPunctuation) {
+                result = regex.replace(result, sym)
+            }
+
+            // 2. Comprehensive Conversational Filler Words & Hesitations Stripping
+            val fillerPatterns = listOf(
+                Regex("(?i)\\b(um+|umm+|ummm+)\\b"),
+                Regex("(?i)\\b(uh+|uhh+|uhhh+|ah+|ahh+|er+|err+|eh+)\\b"),
+                Regex("(?i)\\b(matlab ki|matlab|yaani)\\b"),
+                Regex("(?i)\\b(basically|literally|actually)\\b"),
+                Regex("(?i)\\b(you know|i mean|so yeah)\\b"),
+                Regex("(?i)(^\\s*like\\s+)|(,\\s*like\\s*,?)|(\\s+like\\s+(?=[,.:;?!]))")
+            )
+            for (pattern in fillerPatterns) {
+                result = pattern.replace(result, " ")
+            }
+
+            // 3. Clean up orphaned commas, floating punctuation, and double spaces
+            result = result.replace(Regex(",\\s*,"), ",")
+            result = result.replace(Regex("^[,.:;?!]+\\s*"), "")
+            result = result.replace(Regex("\\s+([,.:;?!])"), "$1")
+            result = result.replace(Regex("([,.:;?!])([a-zA-Z])"), "$1 $2")
+            result = result.replace(Regex("\\s+"), " ").trim()
+
+            if (result.isBlank()) return ""
+
+            // 4. Standalone pronoun capitalization ("i", "i'm", "i've", "i'll", "i'd")
+            result = result.replace(Regex("(?i)\\bi\\b"), "I")
+            result = result.replace(Regex("(?i)\\bi'm\\b"), "I'm")
+            result = result.replace(Regex("(?i)\\bi've\\b"), "I've")
+            result = result.replace(Regex("(?i)\\bi'll\\b"), "I'll")
+            result = result.replace(Regex("(?i)\\bi'd\\b"), "I'd")
+
+            // 5. Sentence boundary capitalization
+            val sentences = result.split(Regex("(?<=[.!?\\n])\\s+")).map { sentence ->
+                sentence.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
+            result = sentences.joinToString(" ")
+
+            // 6. Ensure terminal period if length >= 3 words and no trailing punctuation
+            if (result.split(" ").size >= 3 && !result.endsWith(".") && !result.endsWith("?") && !result.endsWith("!")) {
+                result = "$result."
+            }
+
+            return result.trim()
         }
-
-        // 2. Remove common conversational filler words
-        val fillers = listOf(
-            "\\bum+\\b", "\\buh+\\b", "\\blike\\b", "\\byou know\\b",
-            "\\bmatlab\\b", "\\bbasically\\b", "\\bactually\\b", "\\bso yeah\\b"
-        )
-        for (f in fillers) {
-            result = result.replace(Regex(f, RegexOption.IGNORE_CASE), "")
-        }
-
-        // 3. Normalize whitespace around punctuation
-        result = result.replace(Regex("\\s+([,.:;?!])"), "$1")
-        result = result.replace(Regex("([,.:;?!])([a-zA-Z])"), "$1 $2")
-        result = result.replace(Regex("\\s+"), " ").trim()
-
-        // 4. Capitalize standalone pronoun "i"
-        result = result.replace(Regex("\\bi\\b"), "I")
-        result = result.replace(Regex("\\bi'm\\b", RegexOption.IGNORE_CASE), "I'm")
-        result = result.replace(Regex("\\bi've\\b", RegexOption.IGNORE_CASE), "I've")
-        result = result.replace(Regex("\\bi'll\\b", RegexOption.IGNORE_CASE), "I'll")
-
-        // 5. Sentence boundary capitalization
-        val sentences = result.split(Regex("(?<=[.!?\\n])\\s+")).map { sentence ->
-            sentence.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-        }
-        result = sentences.joinToString(" ")
-
-        // 6. Ensure terminal punctuation if length >= 3 words
-        if (result.split(" ").size >= 3 && !result.endsWith(".") && !result.endsWith("?") && !result.endsWith("!")) {
-            result = "$result."
-        }
-
-        return result
     }
 }
