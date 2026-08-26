@@ -126,7 +126,7 @@ class KVIEInputMethodService : InputMethodService() {
                 .showInputMethodPicker()
         }
 
-        // 4. Setup Keypad Action Buttons
+        // 4. Setup Keypad Action Buttons with instant 0ms touch response
         keyShift.setOnClickListener {
             performKeyHaptic()
             toggleShift()
@@ -139,24 +139,52 @@ class KVIEInputMethodService : InputMethodService() {
 
         setupBackspaceKey()
 
-        keySpace.setOnClickListener {
-            performKeyHaptic()
-            currentInputConnection?.commitText(" ", 1)
+        keySpace.setOnTouchListener { v, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                v.isPressed = true
+                performKeyHaptic()
+                currentInputConnection?.commitText(" ", 1)
+                true
+            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                v.isPressed = false
+                true
+            } else false
         }
 
-        keyDot.setOnClickListener {
-            performKeyHaptic()
-            currentInputConnection?.commitText(if (isSymbolsMode) "/" else ".", 1)
+        keyDot.setOnTouchListener { v, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                v.isPressed = true
+                performKeyHaptic()
+                currentInputConnection?.commitText(if (isSymbolsMode) "/" else ".", 1)
+                true
+            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                v.isPressed = false
+                true
+            } else false
         }
 
-        keyComma.setOnClickListener {
-            performKeyHaptic()
-            currentInputConnection?.commitText(if (isSymbolsMode) "=" else ",", 1)
+        keyComma.setOnTouchListener { v, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                v.isPressed = true
+                performKeyHaptic()
+                currentInputConnection?.commitText(if (isSymbolsMode) "=" else ",", 1)
+                true
+            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                v.isPressed = false
+                true
+            } else false
         }
 
-        keyEnter.setOnClickListener {
-            performKeyHaptic()
-            handleEnterKey()
+        keyEnter.setOnTouchListener { v, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                v.isPressed = true
+                performKeyHaptic()
+                handleEnterKey()
+                true
+            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                v.isPressed = false
+                true
+            } else false
         }
 
         // 5. Render QWERTY key rows
@@ -218,7 +246,7 @@ class KVIEInputMethodService : InputMethodService() {
             gravity = android.view.Gravity.CENTER
             setBackgroundResource(R.drawable.key_bg)
             setTextColor(0xFFFFFFFF.toInt())
-            textSize = 19f
+            textSize = 21f
             setTypeface(null, android.graphics.Typeface.BOLD)
             includeFontPadding = false
             minWidth = 0
@@ -228,15 +256,26 @@ class KVIEInputMethodService : InputMethodService() {
             isFocusable = false
             tag = label
 
-            setOnClickListener {
-                performKeyHaptic()
-                val textToCommit = text.toString()
-                currentInputConnection?.commitText(textToCommit, 1)
+            setOnTouchListener { v, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        v.isPressed = true
+                        performKeyHaptic()
+                        val textToCommit = text.toString()
+                        currentInputConnection?.commitText(textToCommit, 1)
 
-                // Single shift resets after typing 1 character
-                if (isShifted && !isCapsLock && !isSymbolsMode) {
-                    isShifted = false
-                    updateKeyLabels()
+                        // Single shift resets after typing 1 character
+                        if (isShifted && !isCapsLock && !isSymbolsMode) {
+                            isShifted = false
+                            updateKeyLabels()
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        v.isPressed = false
+                        true
+                    }
+                    else -> false
                 }
             }
         }
@@ -293,23 +332,24 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun setupBackspaceKey() {
-        keyBackspace.setOnClickListener {
-            performKeyHaptic()
-            deleteLastCharacter()
-        }
-
-        keyBackspace.setOnLongClickListener {
-            isBackspaceHolding = true
-            startContinuousBackspace()
-            true
-        }
-
-        keyBackspace.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                isBackspaceHolding = false
-                backspaceHandler.removeCallbacksAndMessages(null)
+        keyBackspace.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    performKeyHaptic()
+                    deleteLastCharacter()
+                    isBackspaceHolding = true
+                    startContinuousBackspace()
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    isBackspaceHolding = false
+                    backspaceHandler.removeCallbacksAndMessages(null)
+                    true
+                }
+                else -> false
             }
-            false
         }
     }
 
@@ -319,10 +359,10 @@ class KVIEInputMethodService : InputMethodService() {
                 if (isBackspaceHolding) {
                     performKeyHaptic()
                     deleteLastCharacter()
-                    backspaceHandler.postDelayed(this, 60)
+                    backspaceHandler.postDelayed(this, 40)
                 }
             }
-        }, 300)
+        }, 220)
     }
 
     private fun deleteLastCharacter() {

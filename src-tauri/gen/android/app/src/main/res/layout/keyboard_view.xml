@@ -4,34 +4,34 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#101014"
-    android:paddingStart="3dp"
-    android:paddingEnd="3dp"
-    android:paddingTop="4dp"
-    android:paddingBottom="6dp">
+    android:background="#0F0F13"
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="12dp">
 
     <!-- ───────────── TOP AI VOICE TOOLBAR ───────────── -->
     <LinearLayout
         android:id="@+id/voiceToolbar"
         android:layout_width="match_parent"
-        android:layout_height="40dp"
+        android:layout_height="42dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#181820"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp"
-        android:layout_marginBottom="4dp">
+        android:background="#17171F"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:layout_marginBottom="6dp">
 
         <!-- Voice Mic Button -->
         <ImageButton
             android:id="@+id/micButton"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
             android:background="@drawable/mic_toolbar_btn_bg"
             android:contentDescription="Voice dictation"
             android:src="@android:drawable/ic_btn_speak_now"
             android:scaleType="centerInside"
-            android:padding="4dp" />
+            android:padding="5dp" />
 
         <!-- Status & Live Audio Waveform Text -->
         <TextView
@@ -39,20 +39,20 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="6dp"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="8dp"
             android:singleLine="true"
             android:ellipsize="marquee"
             android:text="KVIE AI Voice (Tap mic)"
             android:textColor="#D7FB52"
             android:textStyle="bold"
-            android:textSize="12sp" />
+            android:textSize="12.5sp" />
 
         <!-- SmolLM2 AI Polish Button -->
         <TextView
             android:id="@+id/polishButton"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
+            android:layout_height="30dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:gravity="center"
@@ -60,9 +60,9 @@
             android:text="✨ Polish"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
-            android:textSize="11sp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
+            android:textSize="11.5sp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
             android:layout_marginEnd="4dp"
             android:clickable="true"
             android:focusable="false" />
@@ -70,8 +70,8 @@
         <!-- Switch IME Globe Button -->
         <ImageButton
             android:id="@+id/switchKeyboardButton"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="Switch input method"
             android:src="@android:drawable/ic_menu_more"
@@ -90,43 +90,43 @@
         <LinearLayout
             android:id="@+id/row1"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="52dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="5dp" />
 
         <!-- ROW 2: A S D F G H J K L -->
         <LinearLayout
             android:id="@+id/row2"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="52dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:layout_marginBottom="4dp" />
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:layout_marginBottom="5dp" />
 
         <!-- ROW 3: [SHIFT] Z X C V B N M [BACKSPACE] -->
         <LinearLayout
             android:id="@+id/row3"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="52dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="4dp">
+            android:layout_marginBottom="5dp">
 
             <TextView
                 android:id="@+id/keyShift"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.4"
+                android:layout_weight="1.45"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="⇧"
                 android:textColor="#FFFFFF"
-                android:textSize="18sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -143,14 +143,14 @@
                 android:id="@+id/keyBackspace"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.4"
+                android:layout_weight="1.45"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="⌫"
                 android:textColor="#FFFFFF"
-                android:textSize="17sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -160,7 +160,7 @@
         <LinearLayout
             android:id="@+id/row4"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="52dp"
             android:orientation="horizontal"
             android:gravity="center">
 
@@ -168,14 +168,14 @@
                 android:id="@+id/keySymbols"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.4"
+                android:layout_weight="1.45"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="\?123"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -191,7 +191,7 @@
                 android:background="@drawable/key_bg"
                 android:text=","
                 android:textColor="#FFFFFF"
-                android:textSize="17sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -206,8 +206,8 @@
                 android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text="KVIE"
-                android:textColor="#9E9EA8"
-                android:textSize="13sp"
+                android:textColor="#A0A0B0"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -223,7 +223,7 @@
                 android:background="@drawable/key_bg"
                 android:text="."
                 android:textColor="#FFFFFF"
-                android:textSize="17sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -238,8 +238,8 @@
                 android:gravity="center"
                 android:background="@drawable/key_accent_bg"
                 android:text="↵"
-                android:textColor="#101014"
-                android:textSize="19sp"
+                android:textColor="#0E0E12"
+                android:textSize="22sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
