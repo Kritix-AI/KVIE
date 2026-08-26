@@ -66,6 +66,23 @@ export const requestAndroidMicPermission = (): void => {
   navigator.mediaDevices?.getUserMedia?.({ audio: true }).catch(() => {})
 }
 
+export const setSelectedAndroidEngine = (engineId: string): void => {
+  try {
+    window.AndroidKeyboardBridge?.setSelectedEngine?.(engineId)
+    localStorage.setItem('kvie_active_android_engine', engineId)
+  } catch {}
+}
+
+export const getSelectedAndroidEngine = (): string => {
+  try {
+    return window.AndroidKeyboardBridge?.getSelectedEngine?.() ||
+      localStorage.getItem('kvie_active_android_engine') ||
+      'android-speech-recognizer'
+  } catch {
+    return 'android-speech-recognizer'
+  }
+}
+
 export const isAndroidKeyboardEnabled = (): boolean => {
   try {
     return window.AndroidKeyboardBridge?.isKeyboardEnabled?.() ?? false

@@ -162,6 +162,18 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
+    fun setSelectedEngine(engineId: String) {
+      val prefs = activity.getSharedPreferences("kvie_prefs", android.content.Context.MODE_PRIVATE)
+      prefs.edit().putString("active_engine", engineId).apply()
+    }
+
+    @JavascriptInterface
+    fun getSelectedEngine(): String {
+      val prefs = activity.getSharedPreferences("kvie_prefs", android.content.Context.MODE_PRIVATE)
+      return prefs.getString("active_engine", "android-speech-recognizer") ?: "android-speech-recognizer"
+    }
+
+    @JavascriptInterface
     fun isMicPermissionGranted(): Boolean {
       return ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }

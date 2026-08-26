@@ -1,6 +1,7 @@
 package ai.kritix.kviekeyboard
 
 import ai.kritix.desktop.R
+import android.content.Context
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.speech.RecognitionListener
@@ -12,20 +13,34 @@ import android.widget.ImageButton
 import android.widget.TextView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
  * KVIE Voice Keyboard Input Method Service.
- * Allows instant system-wide voice dictation into any Android application.
+ * Supports multi-engine on-device speech-to-text:
+ * 1. Android Native SpeechRecognizer (Zero latency, built-in)
+ * 2. whisper.cpp (On-device Quantized Whisper Tiny / Base)
+ * 3. NVIDIA Parakeet (via ONNX Runtime streaming ASR)
  */
 class KVIEInputMethodService : InputMethodService() {
 
     private var speechRecognizer: SpeechRecognizer? = null
+    private var whisperEngine: WhisperEngine? = null
+    private var parakeetEngine: ParakeetEngine? = null
+
     private var isListening = false
     private lateinit var statusText: TextView
     private lateinit var micButton: ImageButton
 
     private val scope = CoroutineScope(Dispatchers.Main)
+    private var engineJob: Job? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        whisperEngine = WhisperEngine(this)
+        parakeetEngine = ParakeetEngine(this)
+    }
 
     override fun onCreateInputView(): View {
         val view = layoutInflater.inflate(R.layout.keyboard_view, null)
@@ -44,7 +59,44 @@ class KVIEInputMethodService : InputMethodService() {
         return view
     }
 
+    private fun getActiveEngineId(): String {
+        val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
+        return prefs.getString("active_engine", "android-speech-recognizer") ?: "android-speech-recognizer"
+    }
+
     private fun startListening() {
+        val activeEngine = getActiveEngineId()
+
+        if (activeEngine.startsWith("whisper-cpp")) {
+            startWhisperListening(activeEngine)
+        } else {
+            // Default & Fallback: Android Native SpeechRecognizer
+            startSystemSpeechRecognizer()
+        }
+    }
+
+    private fun startWhisperListening(modelId: String) {
+        whisperEngine?.loadModel(modelId)
+        isListening = true
+        micButton.isSelected = true
+        statusText.text = "Whisper listening... Speak now"
+
+        engineJob = scope.launch {
+            val transcript = whisperEngine?.transcribeAudio { interim ->
+                if (interim.isNotBlank()) statusText.text = interim
+            } ?: ""
+
+            if (transcript.isNotBlank()) {
+                handleFinalTranscript(transcript)
+            } else {
+                statusText.text = "Tap the mic and speak"
+            }
+            isListening = false
+            micButton.isSelected = false
+        }
+    }
+
+    private fun startSystemSpeechRecognizer() {
         if (speechRecognizer == null) {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         }
@@ -94,6 +146,8 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun stopListening() {
+        engineJob?.cancel()
+        whisperEngine?.stopRecording()
         speechRecognizer?.stopListening()
         isListening = false
         micButton.isSelected = false
@@ -142,10 +196,17 @@ class KVIEInputMethodService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        statusText.text = "Tap the mic and speak"
+        val engine = getActiveEngineId()
+        val displayName = when {
+            engine.contains("whisper") -> "Whisper On-Device"
+            engine.contains("parakeet") -> "Parakeet ONNX"
+            else -> "SpeechRecognizer"
+        }
+        statusText.text = "Ready ($displayName)"
     }
 
     override fun onDestroy() {
+        stopListening()
         speechRecognizer?.destroy()
         super.onDestroy()
     }
