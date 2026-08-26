@@ -189,8 +189,17 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun isKeyboardEnabled(): Boolean {
-      val enabled = Settings.Secure.getString(activity.contentResolver, Settings.Secure.ENABLED_INPUT_METHODS) ?: ""
-      return enabled.contains("KVIEInputMethodService") || enabled.contains("ai.kritix.kviekeyboard")
+      try {
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        val enabledMethods = imm?.enabledInputMethodList ?: return false
+        val pkg = activity.packageName
+        for (method in enabledMethods) {
+          if (method.packageName == pkg || method.serviceName.contains("KVIEInputMethodService") || method.id.contains(pkg)) {
+            return true
+          }
+        }
+      } catch (_: Exception) {}
+      return false
     }
   }
 }
