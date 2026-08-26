@@ -10,6 +10,9 @@ declare global {
       openSetupActivity?: () => void
       isMicPermissionGranted?: () => boolean
       isKeyboardEnabled?: () => boolean
+      getRecordedSessions?: () => string
+      recordSession?: (text: string, targetApp: string) => void
+      clearRecordedSessions?: () => void
     }
   }
 }

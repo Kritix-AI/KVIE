@@ -276,7 +276,8 @@ class FloatingMicService : Service() {
             typed = KVIEAccessibilityService.typeText(stripped)
         }
 
-        SessionManager.recordSession(this, stripped, "KVIE Floating Mic")
+        val targetApp = KVIEAccessibilityService.getActiveAppName(this)
+        SessionManager.recordSession(this, stripped, targetApp)
 
         // 3. If neither typed because Accessibility is not enabled yet, copy & guide user
         if (!typed) {
@@ -302,7 +303,7 @@ class FloatingMicService : Service() {
         scope.launch {
             val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
             if (polished != stripped) {
-                SessionManager.recordSession(this@FloatingMicService, polished, "KVIE Floating Mic (AI Polish)")
+                SessionManager.recordSession(this@FloatingMicService, polished, "$targetApp (AI Polish)")
                 val updatedIme = KVIEInputMethodService.commitFromExternal(polished)
                 if (!updatedIme) {
                     KVIEAccessibilityService.typeText(polished)

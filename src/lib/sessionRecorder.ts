@@ -59,20 +59,57 @@ export const saveVoiceSession = async (sessionOrText: string | VoiceSession, ove
 
   const updatedSessions = [newSession, ...currentSessions]
   localStorage.setItem('kvie_voice_sessions', JSON.stringify(updatedSessions))
+
+  try {
+    window.AndroidKeyboardBridge?.recordSession?.(cleanText, targetApp)
+  } catch {}
+
   window.dispatchEvent(new Event('storage'))
 }
 
 export const getRecordedVoiceSessions = (): VoiceSession[] => {
+  let localList: VoiceSession[] = []
   try {
     const raw = localStorage.getItem('kvie_voice_sessions')
     if (raw) {
-      return JSON.parse(raw)
+      localList = JSON.parse(raw)
     }
   } catch {}
-  return []
+
+  // Fetch native Android sessions from SharedPreferences
+  let androidList: VoiceSession[] = []
+  try {
+    const nativeRaw = window.AndroidKeyboardBridge?.getRecordedSessions?.()
+    if (nativeRaw) {
+      androidList = JSON.parse(nativeRaw)
+    }
+  } catch {}
+
+  if (androidList.length === 0) {
+    return localList
+  }
+
+  // Merge unique sessions by text + timestamp or id
+  const map = new Map<string, VoiceSession>()
+  for (const s of [...androidList, ...localList]) {
+    const key = `${s.text.trim()}_${s.timestamp}`
+    if (!map.has(key)) {
+      map.set(key, s)
+    }
+  }
+
+  const merged = Array.from(map.values()).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+  try {
+    localStorage.setItem('kvie_voice_sessions', JSON.stringify(merged))
+  } catch {}
+
+  return merged
 }
 
 export const clearVoiceSessions = () => {
   localStorage.removeItem('kvie_voice_sessions')
+  try {
+    window.AndroidKeyboardBridge?.clearRecordedSessions?.()
+  } catch {}
   window.dispatchEvent(new Event('storage'))
 }

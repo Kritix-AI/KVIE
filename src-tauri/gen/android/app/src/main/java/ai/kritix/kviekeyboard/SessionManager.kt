@@ -52,8 +52,38 @@ object SessionManager {
         prefs.edit().putString("kvie_voice_sessions", newArray.toString()).apply()
     }
 
+    fun resolveAppName(context: Context, packageName: String?): String {
+        if (packageName.isNullOrBlank()) return "Active Application"
+        return try {
+            val pm = context.packageManager
+            val appInfo = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(appInfo).toString()
+        } catch (_: Exception) {
+            when {
+                packageName.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
+                packageName.contains("chrome", ignoreCase = true) -> "Google Chrome"
+                packageName.contains("telegram", ignoreCase = true) -> "Telegram"
+                packageName.contains("instagram", ignoreCase = true) -> "Instagram"
+                packageName.contains("notes", ignoreCase = true) || packageName.contains("memo", ignoreCase = true) -> "Notes"
+                packageName.contains("mms", ignoreCase = true) || packageName.contains("messaging", ignoreCase = true) -> "Messages"
+                packageName.contains("gmail", ignoreCase = true) -> "Gmail"
+                packageName.contains("twitter", ignoreCase = true) || packageName.contains("x.android", ignoreCase = true) -> "X (Twitter)"
+                packageName.contains("youtube", ignoreCase = true) -> "YouTube"
+                packageName.contains("docs", ignoreCase = true) -> "Google Docs"
+                packageName.contains("slack", ignoreCase = true) -> "Slack"
+                packageName.contains("discord", ignoreCase = true) -> "Discord"
+                else -> packageName.substringAfterLast(".").replaceFirstChar { it.uppercase() }
+            }
+        }
+    }
+
     fun getSessionsJson(context: Context): String {
         val prefs = context.getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
         return prefs.getString("kvie_voice_sessions", "[]") ?: "[]"
+    }
+
+    fun clearSessions(context: Context) {
+        val prefs = context.getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
+        prefs.edit().remove("kvie_voice_sessions").apply()
     }
 }

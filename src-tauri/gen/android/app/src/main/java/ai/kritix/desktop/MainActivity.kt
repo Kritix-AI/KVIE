@@ -222,5 +222,20 @@ class MainActivity : TauriActivity() {
       } catch (_: Exception) {}
       return false
     }
+
+    @JavascriptInterface
+    fun getRecordedSessions(): String {
+      return ai.kritix.kviekeyboard.SessionManager.getSessionsJson(activity)
+    }
+
+    @JavascriptInterface
+    fun recordSession(text: String, targetApp: String) {
+      ai.kritix.kviekeyboard.SessionManager.recordSession(activity, text, targetApp)
+    }
+
+    @JavascriptInterface
+    fun clearRecordedSessions() {
+      ai.kritix.kviekeyboard.SessionManager.clearSessions(activity)
+    }
   }
 }

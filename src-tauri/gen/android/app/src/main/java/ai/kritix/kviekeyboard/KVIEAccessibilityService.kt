@@ -66,6 +66,8 @@ class KVIEAccessibilityService : AccessibilityService() {
             return false
         }
 
+        lastTargetPackage = targetNode.packageName?.toString()
+
         try {
             // Step 3: Try ACTION_PASTE first (standard for all apps, preserving cursor position)
             val pasteSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
@@ -89,6 +91,8 @@ class KVIEAccessibilityService : AccessibilityService() {
             return false
         }
     }
+
+    private var lastTargetPackage: String? = null
 
     private fun findEditableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         // 1. Direct input focus
@@ -123,6 +127,12 @@ class KVIEAccessibilityService : AccessibilityService() {
 
         fun typeText(text: String): Boolean {
             return instance?.typeTextIntoFocusedField(text) ?: false
+        }
+
+        fun getActiveAppName(context: Context): String {
+            val pkg = instance?.lastTargetPackage 
+                ?: instance?.rootInActiveWindow?.packageName?.toString()
+            return SessionManager.resolveAppName(context, pkg)
         }
     }
 }
