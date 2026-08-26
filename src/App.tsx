@@ -49,7 +49,7 @@ import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets 
 import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import { processSpokenVoiceText } from './lib/incrementalTypingEngine'
-import { fetchModelsStatus, selectActiveModel, downloadModelWithProgress } from './lib/modelsApi'
+import { fetchModelsStatus, selectActiveModel, downloadModelWithProgress, downloadAndroidModelWithProgress } from './lib/modelsApi'
 import {
   isAndroid,
   openAndroidKeyboardSettings,
@@ -263,7 +263,11 @@ export function App() {
     if (isAndroidEnv) {
       const activeAndroidEngine = getSelectedAndroidEngine()
       setActiveModelId(activeAndroidEngine)
-      setDownloadedModels(['android-speech-recognizer', 'whisper-cpp-tiny', 'whisper-cpp-base', 'nvidia-parakeet-onnx'])
+      const savedAndroidDownloads: string[] = JSON.parse(
+        localStorage.getItem('kvie_downloaded_android_models') || '[]'
+      )
+      // Android SpeechRecognizer is built into the OS, others require on-device download
+      setDownloadedModels(['android-speech-recognizer', ...savedAndroidDownloads])
     }
   }, [])
 
@@ -491,6 +495,46 @@ export function App() {
       ...prev,
       [modelId]: { pct: 1, downloadedMB: 0, totalMB: 0, status: 'Connecting to Hugging Face...' },
     }))
+
+    if (isAndroidDevice) {
+      downloadAndroidModelWithProgress(
+        modelId,
+        payload => {
+          const dMB = payload.downloaded_bytes ? Math.round(payload.downloaded_bytes / (1024 * 1024)) : 0
+          const tMB = payload.total_bytes ? Math.round(payload.total_bytes / (1024 * 1024)) : 0
+          setDownloadProgress(prev => ({
+            ...prev,
+            [modelId]: {
+              pct: payload.progress,
+              downloadedMB: dMB,
+              totalMB: tMB,
+              status: payload.status,
+            },
+          }))
+        },
+        () => {
+          setDownloadedModels(old => {
+            const updated = [...new Set([...old, modelId])]
+            localStorage.setItem('kvie_downloaded_android_models', JSON.stringify(updated))
+            return updated
+          })
+          setDownloadProgress(prev => {
+            const next = { ...prev }
+            delete next[modelId]
+            return next
+          })
+          handleSelectModel(modelId)
+        },
+        _err => {
+          setDownloadProgress(prev => {
+            const next = { ...prev }
+            delete next[modelId]
+            return next
+          })
+        }
+      )
+      return
+    }
 
     downloadModelWithProgress(
       modelId,
