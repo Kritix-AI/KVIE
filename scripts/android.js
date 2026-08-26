@@ -87,6 +87,17 @@ const args = process.argv.slice(2)
 console.log(`[KVIE Android Engine] JAVA_HOME: ${process.env.JAVA_HOME}`)
 console.log(`[KVIE Android Engine] ANDROID_HOME: ${process.env.ANDROID_HOME}`)
 console.log(`[KVIE Android Engine] NDK_HOME: ${process.env.NDK_HOME}`)
+
+try {
+  const { execSync } = require('child_process')
+  const adbPath = path.join(process.env.ANDROID_HOME || '', 'platform-tools', isWindows ? 'adb.exe' : 'adb')
+  if (fs.existsSync(adbPath)) {
+    execSync(`"${adbPath}" reverse tcp:8765 tcp:8765`, { stdio: 'ignore' })
+    execSync(`"${adbPath}" reverse tcp:1420 tcp:1420`, { stdio: 'ignore' })
+    console.log(`[KVIE Android Engine] Port reverse proxy active: Phone (127.0.0.1:8765) -> PC Python / LLM Backend`)
+  }
+} catch {}
+
 console.log(`[KVIE Android Engine] Executing Tauri Android: ${args.join(' ')}\n`)
 
 const { run, logError } = require('@tauri-apps/cli/main.js')

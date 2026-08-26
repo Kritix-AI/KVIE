@@ -11,25 +11,39 @@ import java.util.concurrent.TimeUnit
 
 object AutoEditClient {
 
-    private const val BASE_URL = "http://192.168.1.3:8765/api/autoedit"
+    private val endpoints = listOf(
+        "http://127.0.0.1:8765/api/autoedit",  // USB reverse proxy & on-device
+        "http://10.0.2.2:8765/api/autoedit",   // Emulator host routing
+        "http://192.168.1.3:8765/api/autoedit" // Local Wi-Fi network host
+    )
+
     private val client = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
         .build()
 
     suspend fun refine(text: String): String? = withContext(Dispatchers.IO) {
-        try {
-            val body = JSONObject().put("text", text).toString()
-                .toRequestBody("application/json".toMediaType())
-            val request = Request.Builder().url(BASE_URL).post(body).build()
+        if (text.isBlank()) return@withContext null
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val json = JSONObject(response.body?.string().orEmpty())
-                json.optString("refined_text", text)
+        val body = JSONObject().put("text", text).toString()
+            .toRequestBody("application/json".toMediaType())
+
+        for (url in endpoints) {
+            try {
+                val request = Request.Builder().url(url).post(body).build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val json = JSONObject(response.body?.string().orEmpty())
+                        val refined = json.optString("refined_text", "")
+                        if (refined.isNotBlank()) {
+                            return@withContext refined
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Try next endpoint
             }
-        } catch (e: Exception) {
-            null // fallback gracefully to Stage 1 transcription
         }
+        return@withContext null // Fallback gracefully to Stage 1 transcription
     }
 }

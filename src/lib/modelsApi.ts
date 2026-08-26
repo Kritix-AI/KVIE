@@ -22,11 +22,8 @@ export interface ModelsStatusResponse {
 
 export const getServiceBaseUrl = (): string => {
   if (typeof window !== 'undefined') {
-    const isAndroid = /android/i.test(navigator.userAgent)
-    if (isAndroid) {
-      // In Android emulator, 10.0.2.2 points to host PC
-      return 'http://10.0.2.2:8765'
-    }
+    const custom = localStorage.getItem('kvie_backend_url')
+    if (custom) return custom
   }
   return 'http://127.0.0.1:8765'
 }
