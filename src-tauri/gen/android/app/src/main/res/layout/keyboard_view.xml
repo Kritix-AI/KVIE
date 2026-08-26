@@ -4,35 +4,34 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#121216"
-    android:paddingStart="4dp"
-    android:paddingEnd="4dp"
-    android:paddingTop="6dp"
-    android:paddingBottom="8dp">
+    android:background="#101014"
+    android:paddingStart="3dp"
+    android:paddingEnd="3dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="6dp">
 
     <!-- ───────────── TOP AI VOICE TOOLBAR ───────────── -->
     <LinearLayout
         android:id="@+id/voiceToolbar"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="40dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#19191F"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:layout_marginBottom="6dp"
-        android:clipToOutline="true">
+        android:background="#181820"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:layout_marginBottom="4dp">
 
         <!-- Voice Mic Button -->
         <ImageButton
             android:id="@+id/micButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
             android:background="@drawable/mic_toolbar_btn_bg"
             android:contentDescription="Voice dictation"
             android:src="@android:drawable/ic_btn_speak_now"
             android:scaleType="centerInside"
-            android:padding="6dp" />
+            android:padding="4dp" />
 
         <!-- Status & Live Audio Waveform Text -->
         <TextView
@@ -41,40 +40,43 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp"
+            android:layout_marginEnd="6dp"
             android:singleLine="true"
             android:ellipsize="marquee"
             android:text="KVIE AI Voice (Tap mic)"
             android:textColor="#D7FB52"
             android:textStyle="bold"
-            android:textSize="12.5sp" />
+            android:textSize="12sp" />
 
         <!-- SmolLM2 AI Polish Button -->
-        <Button
+        <TextView
             android:id="@+id/polishButton"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="28dp"
             android:minWidth="0dp"
             android:minHeight="0dp"
+            android:gravity="center"
             android:background="@drawable/key_special_bg"
             android:text="✨ Polish"
-            android:textAllCaps="false"
             android:textColor="#FFFFFF"
+            android:textStyle="bold"
             android:textSize="11sp"
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
-            android:layout_marginEnd="4dp" />
+            android:layout_marginEnd="4dp"
+            android:clickable="true"
+            android:focusable="false" />
 
         <!-- Switch IME Globe Button -->
         <ImageButton
             android:id="@+id/switchKeyboardButton"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="Switch input method"
             android:src="@android:drawable/ic_menu_more"
             android:scaleType="centerInside"
-            android:padding="4dp" />
+            android:padding="3dp" />
     </LinearLayout>
 
     <!-- ───────────── QWERTY KEYBOARD CONTAINER ───────────── -->
@@ -88,7 +90,7 @@
         <LinearLayout
             android:id="@+id/row1"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:orientation="horizontal"
             android:gravity="center"
             android:layout_marginBottom="4dp" />
@@ -97,31 +99,37 @@
         <LinearLayout
             android:id="@+id/row2"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:orientation="horizontal"
             android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
             android:layout_marginBottom="4dp" />
 
         <!-- ROW 3: [SHIFT] Z X C V B N M [BACKSPACE] -->
         <LinearLayout
             android:id="@+id/row3"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:orientation="horizontal"
             android:gravity="center"
             android:layout_marginBottom="4dp">
 
-            <Button
+            <TextView
                 android:id="@+id/keyShift"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="⇧"
                 android:textColor="#FFFFFF"
-                android:textSize="18sp" />
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
 
             <LinearLayout
                 android:id="@+id/row3Letters"
@@ -131,87 +139,110 @@
                 android:orientation="horizontal"
                 android:gravity="center" />
 
-            <Button
+            <TextView
                 android:id="@+id/keyBackspace"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="⌫"
                 android:textColor="#FFFFFF"
-                android:textSize="16sp" />
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
         </LinearLayout>
 
         <!-- ROW 4: [?123] [,] [ SPACE (KVIE) ] [.] [ENTER ↵] -->
         <LinearLayout
             android:id="@+id/row4"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:orientation="horizontal"
             android:gravity="center">
 
-            <Button
+            <TextView
                 android:id="@+id/keySymbols"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.5"
+                android:layout_weight="1.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="\?123"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp" />
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
 
-            <Button
+            <TextView
                 android:id="@+id/keyComma"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text=","
                 android:textColor="#FFFFFF"
-                android:textSize="16sp" />
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
 
-            <Button
+            <TextView
                 android:id="@+id/keySpace"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="4.5"
+                android:layout_weight="4.6"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text="KVIE"
-                android:textColor="#8E8E98"
-                android:textSize="12sp" />
+                android:textColor="#9E9EA8"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
 
-            <Button
+            <TextView
                 android:id="@+id/keyDot"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text="."
                 android:textColor="#FFFFFF"
-                android:textSize="16sp" />
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
 
-            <Button
+            <TextView
                 android:id="@+id/keyEnter"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1.6"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
+                android:gravity="center"
                 android:background="@drawable/key_accent_bg"
                 android:text="↵"
-                android:textColor="#121214"
+                android:textColor="#101014"
+                android:textSize="19sp"
                 android:textStyle="bold"
-                android:textSize="18sp" />
+                android:clickable="true"
+                android:focusable="false" />
         </LinearLayout>
     </LinearLayout>
 

@@ -46,14 +46,14 @@ class KVIEInputMethodService : InputMethodService() {
 
     private lateinit var statusText: TextView
     private lateinit var micButton: ImageButton
-    private lateinit var polishButton: Button
-    private lateinit var keyShift: Button
-    private lateinit var keySymbols: Button
-    private lateinit var keyBackspace: Button
-    private lateinit var keySpace: Button
-    private lateinit var keyDot: Button
-    private lateinit var keyComma: Button
-    private lateinit var keyEnter: Button
+    private lateinit var polishButton: TextView
+    private lateinit var keyShift: TextView
+    private lateinit var keySymbols: TextView
+    private lateinit var keyBackspace: TextView
+    private lateinit var keySpace: TextView
+    private lateinit var keyDot: TextView
+    private lateinit var keyComma: TextView
+    private lateinit var keyEnter: TextView
 
     private lateinit var row1: LinearLayout
     private lateinit var row2: LinearLayout
@@ -67,7 +67,7 @@ class KVIEInputMethodService : InputMethodService() {
     private val symbolKeysRow2 = listOf("@", "#", "$", "_", "&", "-", "+", "(", ")")
     private val symbolKeysRow3 = listOf("*", "\"", "'", ":", ";", "!", "?")
 
-    private val currentKeyButtons = mutableListOf<Button>()
+    private val currentKeyButtons = mutableListOf<TextView>()
     private val scope = CoroutineScope(Dispatchers.Main)
     private var engineJob: Job? = null
 
@@ -191,17 +191,24 @@ class KVIEInputMethodService : InputMethodService() {
         updateKeyLabels()
     }
 
-    private fun createKeyButton(label: String): Button {
-        val btn = Button(this).apply {
+    private fun createKeyButton(label: String): TextView {
+        val btn = TextView(this).apply {
             val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 marginStart = 2
                 marginEnd = 2
             }
             layoutParams = params
+            gravity = android.view.Gravity.CENTER
             setBackgroundResource(R.drawable.key_bg)
             setTextColor(0xFFFFFFFF.toInt())
-            textSize = 17f
-            isAllCaps = false
+            textSize = 19f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            includeFontPadding = false
+            minWidth = 0
+            minHeight = 0
+            setPadding(0, 0, 0, 0)
+            isClickable = true
+            isFocusable = false
             tag = label
 
             setOnClickListener {
