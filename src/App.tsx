@@ -693,7 +693,7 @@ export function App() {
         </aside>
 
         {/* Main Content Area (Scrolls smoothly with touch optimizations) */}
-        <section className="flex min-w-0 flex-1 flex-col h-full overflow-y-auto px-4 py-4 sm:px-8 sm:py-8 pb-28 md:pb-8 touch-scroll safe-top safe-bottom">
+        <section className="flex min-w-0 flex-1 flex-col h-full overflow-y-auto px-4 py-4 sm:px-8 sm:py-8 pb-36 md:pb-8 touch-scroll safe-top safe-bottom">
           {/* Header */}
           <header className="flex items-center justify-between gap-3 mb-6">
             <div className="flex items-center gap-3">
@@ -756,7 +756,7 @@ export function App() {
 
           {/* ──────────────── TAB VIEW 1: WORKSPACE ──────────────── */}
           {activeNav === 'Workspace' && (
-            <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-between py-2 sm:py-6">
+            <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-between py-2 sm:py-6 pb-28 md:pb-0">
               {/* Android Keyboard Quick Banner (If on mobile) */}
               <div
                 onClick={() => setActiveNav('Voice IME')}
@@ -902,7 +902,7 @@ export function App() {
 
           {/* ──────────────── TAB VIEW 2: KVIE ANDROID VOICE KEYBOARD (IME) HUB ──────────────── */}
           {activeNav === 'Voice IME' && (
-            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6">
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6 pb-36 md:pb-6">
               {/* Hero Banner */}
               <div
                 className="rounded-3xl border bg-panel/80 p-6 sm:p-8 backdrop-blur-xl relative overflow-hidden"
@@ -1076,7 +1076,7 @@ export function App() {
 
           {/* ──────────────── TAB VIEW 3: SESSIONS ──────────────── */}
           {activeNav === 'Sessions' && (
-            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6">
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 pb-36 md:pb-6">
               <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-3.5 top-3 h-4 w-4 text-zinc-500" />
@@ -1138,7 +1138,7 @@ export function App() {
 
           {/* ──────────────── TAB VIEW 4: STT MODEL MANAGER ──────────────── */}
           {activeNav === 'Models' && (
-            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6">
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6 pb-40 md:pb-6">
               <div className="rounded-3xl border border-line bg-panel/80 p-6">
                 <div className="flex items-center gap-3">
                   <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
@@ -1236,7 +1236,7 @@ export function App() {
 
           {/* ──────────────── TAB VIEW 5: SETTINGS ──────────────── */}
           {activeNav === 'Settings' && (
-            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6">
+            <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6 pb-40 md:pb-6">
               {/* THEME & COLOR PALETTE */}
               <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
                 <div className="flex items-center gap-3">
