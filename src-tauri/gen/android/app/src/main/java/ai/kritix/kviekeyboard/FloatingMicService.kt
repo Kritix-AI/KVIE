@@ -268,13 +268,26 @@ class FloatingMicService : Service() {
         val stripped = SmolLMEngine.stripFillersAndPunctuate(raw)
         if (stripped.isBlank()) return
 
+        // 1. Direct Real-Time Typing into whatever app is currently active
+        val typedDirectly = KVIEAccessibilityService.typeText(stripped)
+
         scope.launch {
             val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
-            // Copy polished text to system clipboard for immediate pasting into active field
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val clip = ClipData.newPlainText("KVIE Voice", polished)
-            clipboard?.setPrimaryClip(clip)
-            Toast.makeText(this@FloatingMicService, "🎙️ Dictated & Copied: \"$polished\"", Toast.LENGTH_SHORT).show()
+
+            if (!typedDirectly) {
+                val typedPolished = KVIEAccessibilityService.typeText(polished)
+                if (!typedPolished) {
+                    // Fallback to clipboard if accessibility is not enabled yet
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    val clip = ClipData.newPlainText("KVIE Voice", polished)
+                    clipboard?.setPrimaryClip(clip)
+                    Toast.makeText(this@FloatingMicService, "🎙️ Copied: \"$polished\"", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@FloatingMicService, "🎙️ Typed directly into field", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(this@FloatingMicService, "🎙️ Typed directly into field", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">"KVIE"</string>
     <string name="main_activity_title">"KVIE"</string>
+    <string name="accessibility_description">"Enables KVIE Floating Voice Mic to type dictated words directly in real-time into any focused input field."</string>
 </resources>

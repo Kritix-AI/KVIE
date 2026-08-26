@@ -1357,13 +1357,13 @@ export function App() {
           {activeNav === 'Settings' && (
             <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6 pb-40 md:pb-6">
               {/* THEME & COLOR PALETTE */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+              <div className="rounded-2xl sm:rounded-3xl border border-line bg-panel/80 p-4 sm:p-6 space-y-4 sm:space-y-6">
                 <div className="flex items-center gap-3">
                   <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
                     <Palette className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-zinc-100 text-lg">Theme &amp; Accent Color Palette</h3>
+                    <h3 className="font-semibold text-zinc-100 text-base sm:text-lg">Theme &amp; Accent Color Palette</h3>
                     <p className="text-xs text-zinc-400">Choose from curated presets or pick any custom hex accent</p>
                   </div>
                 </div>
@@ -1395,7 +1395,7 @@ export function App() {
               </div>
 
               {/* MULTI-TIER GRAMMAR ROUTER PIPELINE */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+              <div className="rounded-2xl sm:rounded-3xl border border-line bg-panel/80 p-4 sm:p-6 space-y-4 sm:space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
@@ -1403,7 +1403,7 @@ export function App() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-zinc-100 text-lg">Multi-Tier Grammar Router</h3>
+                        <h3 className="font-semibold text-zinc-100 text-base sm:text-lg">Multi-Tier Grammar Router</h3>
                         <span className="rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 border border-emerald-500/30 font-medium">
                           Token + Sentence + Paragraph
                         </span>
@@ -1481,14 +1481,14 @@ export function App() {
               </div>
 
               {/* LIVE TRANSLATION ENGINE */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+              <div className="rounded-2xl sm:rounded-3xl border border-line bg-panel/80 p-4 sm:p-6 space-y-4 sm:space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
                       <Languages className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-zinc-100 text-lg">Live Voice Translation Engine</h3>
+                      <h3 className="font-semibold text-zinc-100 text-base sm:text-lg">Live Voice Translation Engine</h3>
                       <p className="text-xs text-zinc-400">Speak in any language and auto-translate output into your target language</p>
                     </div>
                   </div>
@@ -1524,14 +1524,14 @@ export function App() {
               </div>
 
               {/* VOICE SNIPPETS & EXPANSIONS */}
-              <div className="rounded-3xl border border-line bg-panel/80 p-6 space-y-6">
+              <div className="rounded-2xl sm:rounded-3xl border border-line bg-panel/80 p-4 sm:p-6 space-y-4 sm:space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
                       <Zap className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-zinc-100 text-lg">Voice Snippets &amp; Macro Triggers</h3>
+                      <h3 className="font-semibold text-zinc-100 text-base sm:text-lg">Voice Snippets &amp; Macro Triggers</h3>
                       <p className="text-xs text-zinc-400">Map spoken trigger phrases to auto-expanding text templates</p>
                     </div>
                   </div>
