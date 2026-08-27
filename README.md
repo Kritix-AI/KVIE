@@ -1,118 +1,167 @@
-# 🎙️ Kritix - Voice Intelligence Engine (KVIE)
+<p align="center">
+  <img src="docs/screenshots/kvie_logo.jpg" alt="Kritix Voice Intelligence Engine (KVIE) Logo" width="220" style="border-radius: 50%; box-shadow: 0 0 35px rgba(215, 251, 82, 0.4);" />
+</p>
 
-> **Local-First, Ultra-Fast AI Voice Typing & System-Wide Auto-Injection Engine for Windows & macOS.**  
-> *100% Wispr Flow Parity with Complete Privacy & Zero Cloud Lag.*
+<h1 align="center">🎙️ Kritix - Voice Intelligence Engine (KVIE)</h1>
 
-[![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg?logo=rust)](https://www.rust-lang.org/)
-[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-black.svg?logo=apple)](https://apple.com)
-[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows)](https://microsoft.com)
-[![React](https://img.shields.io/badge/React-18-cyan.svg?logo=react)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <b>Local-First, Ultra-Fast AI Voice Typing & System-Wide Auto-Injection Engine for Desktop (Windows & macOS) and Android Mobile.</b><br />
+  <i>100% Wispr Flow Parity with Complete On-Device Privacy & Zero Cloud Latency.</i>
+</p>
+
+<p align="center">
+  <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri" alt="Tauri v2" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg?logo=rust" alt="Rust" /></a>
+  <a href="https://developer.android.com/"><img src="https://img.shields.io/badge/Android-API%2029%2B%20(ARM64)-3DDC84.svg?logo=android&logoColor=white" alt="Android" /></a>
+  <a href="https://microsoft.com"><img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows" alt="Windows" /></a>
+  <a href="https://apple.com"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-black.svg?logo=apple" alt="macOS" /></a>
+  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18-cyan.svg?logo=react" alt="React 18" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.0-blue.svg?logo=typescript" alt="TypeScript 5" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+</p>
+
+---
+
+## 📸 Screenshots & Showcase
+
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="50%">
+      <b>📱 Mobile Voice Workspace</b><br/><br/>
+      <img src="docs/screenshots/mobile_workspace.jpg" alt="Mobile Voice Workspace" width="340" style="border-radius: 12px; border: 1px solid #282838;" />
+    </td>
+    <td align="center" width="50%">
+      <b>⌨️ Next-Gen Keyboard & Voice Sessions</b><br/><br/>
+      <img src="docs/screenshots/mobile_keyboard_sessions.jpg" alt="Next-Gen Keyboard & Voice Sessions" width="340" style="border-radius: 12px; border: 1px solid #282838;" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <b>🖥️ Desktop Floating Mic Pill Widget (Expanded & Compact)</b><br/><br/>
+      <img src="docs/screenshots/floating_widget_expanded.png" alt="Desktop Floating Mic Widget Expanded" width="540" style="margin-bottom: 10px; border-radius: 20px; border: 1px solid #D7FB52;" /><br/>
+      <img src="docs/screenshots/floating_widget_collapsed.png" alt="Desktop Floating Mic Widget Collapsed" width="280" style="border-radius: 20px; border: 1px solid #D7FB52;" />
+    </td>
+  </tr>
+</table>
 
 ---
 
 ## ✨ Overview
 
-**Kritix Voice Intelligence Engine (KVIE)** is an open-source, local-first voice productivity shell that turns your speech into polished prose across **any Windows & macOS application** (Chrome, VS Code, Slack, Discord, WhatsApp Desktop, MS Word, Notes, TextEdit, Notepad).
+**Kritix Voice Intelligence Engine (KVIE)** is an open-source, private, local-first voice productivity suite. It transforms your raw speech into polished, context-aware prose across **any Windows, macOS, or Android application** (WhatsApp, Chrome, Gmail, Slack, VS Code, Discord, Notes, Microsoft Office, Telegram, and more).
 
-Engineered with a high-performance **Tauri v2 + Rust** core:
-- **Windows**: Native Low-Level Keyboard Hooks (`WH_KEYBOARD_LL`), Win32 Process Inspection, and Windows UI Automation COM interfaces (`IUIAutomation`).
-- **macOS**: Native `CGEventTap` global hotkey monitor, Cocoa `NSWorkspace` frontmost app detection, and macOS Accessibility APIs (`AXUIElement`).
-
-KVIE reads surrounding text context and executes intelligent real-time auto-editing via **Qwen2.5-1.5B-Instruct**.
+Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio stream to external servers, **KVIE executes entirely on your hardware**:
+- **Desktop (Windows & macOS)**: Tauri v2 + Rust core leveraging Win32 `WH_KEYBOARD_LL` and macOS `CGEventTap` for global hotkeys, Windows UI Automation (`IUIAutomation`) & macOS `AXUIElement` for surrounding text context, and local Whisper / Qwen2.5-1.5B models.
+- **Android Mobile**: High-performance native Kotlin input method (`InputMethodService`), accessibility automation (`AccessibilityService`), floating mic overlay (`WindowManager`), and on-device **SmolLM2-360M** + **NVIDIA Parakeet ONNX** models.
 
 ---
 
-## 📊 KVIE vs. Wispr Flow Feature Parity Matrix
+## 📊 Feature Comparison Matrix
 
-| Feature / Architecture Layer | Wispr Flow | Kritix (KVIE) | Status |
-| :--- | :--- | :--- | :--- |
-| **System-Wide Global Hotkey** | ✅ `Ctrl+Alt+R` / `⌘+⌥+R` | ✅ **Windows (`WH_KEYBOARD_LL`) & macOS (`CGEventTap`)** | 🟢 **COMPLETED** |
-| **Active App Detection** | ✅ Process Name & Title | ✅ Dual Win32 Process Inspector & macOS `NSWorkspace` | 🟢 **COMPLETED** |
-| **Real-Time Cross-App Auto-Inject** | ✅ Instant System Injection | ✅ Differential `eraseAndInject` + Clipboard Simulation (`Cmd+V` / `Ctrl+V`) | 🟢 **COMPLETED** |
-| **System Tray & Close-to-Tray** | ✅ Yes | ✅ Rust `setup_system_tray` + `CloseRequested` Intercept | 🟢 **COMPLETED** |
-| **Floating Mic Overlay Widget** | ✅ Sleek Floating Pill | ✅ Compact Floating Pill Widget (Always-On-Top, Non-Obtrusive) | 🟢 **COMPLETED** |
-| **Local / Privacy-First Engine** | ❌ Cloud-Only (Requires Internet) | ✅ **100% Local & Private** (Faster-Whisper / Whisper Large-v3 Turbo) | 🟢 **KVIE ADVANTAGE!** |
-| **Surrounding Text Context Extraction** | ✅ Reads screen text via OS Accessibility | ✅ **Windows COM (`IUIAutomation`) & macOS Accessibility (`AXUIElement`)** | 🟢 **COMPLETED** |
-| **AI LLM Post-Processing (Auto-Edit)** | ✅ Strips "um/ah", fixes grammar & formatting | ✅ **Dual-Stage Engine: 0ms Regex + Qwen2.5-1.5B-Instruct Model** | 🟢 **COMPLETED** |
-| **Voice Snippets & Text Expansion** | ✅ Spoken triggers expand to long templates | ✅ **Spoken Cue Engine** (Calendly, Signatures, Addresses, Phone) | 🟢 **COMPLETED** |
-| **Voice Command Mode** | ✅ Spoken instructions (*"Make this email formal"*) | ✅ **Voice Instruction Execution Engine** (*"Make formal"*, *"Summarize"*) | 🟢 **COMPLETED** |
-| **Personalized Custom Dictionary** | ✅ Custom names, acronyms, jargon | ✅ **Vocabulary Bias Engine** (Kritix, Tauri, Hinglish, Custom terms) | 🟢 **COMPLETED** |
-| **Live Translation (100+ Languages)** | ✅ Translate spoken voice to target language | ✅ **Live Voice Translation Engine** (English, Hindi, Spanish, French, etc.) | 🟢 **COMPLETED** |
+| Feature / Architecture Layer | Wispr Flow | Gboard / Samsung | Kritix (KVIE) |
+| :--- | :---: | :---: | :---: |
+| **Complete Local & Offline Execution** | ❌ (Cloud-only) | ⚠️ (Basic offline) | ✅ **100% Private On-Device Models** |
+| **System-Wide Global Hotkey (`Ctrl+Alt+R` / `⌘+⌥+R`)** | ✅ | ❌ | ✅ **Windows (`WH_KEYBOARD_LL`) & macOS (`CGEventTap`)** |
+| **Cross-App Auto-Inject Everywhere** | ✅ | ❌ | ✅ **Differential `eraseAndInject` + UI Automation** |
+| **Surrounding Text Context Awareness** | ✅ | ❌ | ✅ **0ms OS Accessibility Reader** |
+| **AI LLM Post-Processing (Tone & Polish)** | ✅ | ❌ | ✅ **SmolLM2-360M & Qwen2.5-1.5B (Formal, Casual, Shorten)** |
+| **Per-App Automatic Tone Adaptation** | ❌ | ❌ | ✅ **Auto-detects WhatsApp ➔ Casual vs. Gmail ➔ Formal** |
+| **Spoken Voice Editing Commands** | ❌ | ❌ | ✅ **"Delete that", "Clear all", "New line", "Make formal"** |
+| **Next-Gen Android QWERTY Keyboard** | ❌ | ✅ | ✅ **Full QWERTY, Number Row (`123`), Alt-Symbols** |
+| **Case-Aware Autocorrect & Bigram Prediction** | ❌ | ✅ | ✅ **Contextual next-word & grammar fixes** |
+| **500+ Emoji Library with Real-Time Search** | ❌ | ✅ | ✅ **8 Categories + Live Keyword Search** |
+| **Multi-Item Clipboard History Drawer** | ❌ | ✅ | ✅ **Recent clips drawer with instant paste** |
+| **Voice Snippets & Text Expansion** | ✅ | ❌ | ✅ **Spoken trigger expansion** (e.g. *"my calendly"*) |
+| **Live Multi-Language Translation** | ✅ | ⚠️ (Cloud) | ✅ **100+ Languages with local target injection** |
 
 ---
 
-## 🚀 Key Features
+## 🚀 Flagship Features
 
-### 1. ⌨️ System-Wide Global Hotkey (`Ctrl + Alt + R` / `⌘ + ⌥ + R`)
-* **Windows**: Uses native Windows kernel driver hook `SetWindowsHookExW(WH_KEYBOARD_LL)`.
-* **macOS**: Uses native CoreGraphics event tap `CGEventTap` to capture `Cmd + Option + R` globally across all spaces and apps.
+### 🖥️ Desktop (Windows & macOS)
 
-### 2. 👁️ Surrounding Text Context Reader
-* **Windows**: Uses `IUIAutomationTextPattern` & `IUIAutomationValuePattern` to read up to **500 characters** surrounding the cursor.
-* **macOS**: Uses macOS Accessibility API (`AXUIElementCopyAttributeValue` with `kAXFocusedUIElementAttribute` & `kAXValueAttribute`).
+1. **⌨️ Global Hotkey & System Tray**:
+   - Dedicated hotkey (`Ctrl + Alt + R` on Windows, `Cmd + Option + R` on macOS) brings up voice capture anywhere.
+   - Runs silently in the system tray with instant minimize/restore.
+2. **👁️ Surrounding Context Reader**:
+   - Reads up to 500 characters of surrounding text before the cursor using native COM `IUIAutomation` (Windows) or `AXUIElement` (macOS).
+3. **🪄 Compact Floating Mic Pill**:
+   - Always-on-top draggable pill widget with 1-click expand/collapse, Universal Auto-Inject, Voice Command Mode, and Translate.
+4. **⚡ Voice Snippets & Expansion**:
+   - Spoken cues expand into rich text templates (e.g., *"my signature"* expands into complete multi-line sign-offs).
+5. **📖 Custom Brand Dictionary**:
+   - Custom phonetic rules bias transcription and formatting (*"critics"* ➔ *"Kritix"*, *"tauri"* ➔ *"Tauri"*).
 
-### 3. 🧠 Dual-Stage AI Auto-Edit (Qwen2.5-1.5B-Instruct)
-* **Stage 1 (0ms Regex Filter)**: Strips hesitations (*"um"*, *"uh"*, *"aah"*, *"like"*), fixes spacing, and cleans duplicate words.
-* **Stage 2 (Qwen2.5-1.5B-Instruct)**: Resolves false starts (*"meeting at 2... wait 3 PM"* → *"meeting at 3 PM"*) and formats text while strictly preserving **Verbatim Roman Hinglish** script (*"Aaj ka kya plan hai bhai"*).
+---
 
-### 4. 🪄 Voice Command Mode
-* Execute spoken instructions on existing text:
-  * *"Make this email formal and polite"*
-  * *"Summarize this into 3 bullet points"*
-  * *"Shorten this draft"*
+### 📱 Android Mobile (Keyboard & Floating Mic)
 
-### 5. ⚡ Voice Snippets & Text Expansion
-* Define spoken trigger cues that expand into templates:
-  * *"my meeting link"* → `https://calendly.com/kritix/30min`
-  * *"my email signature"* → `Best regards,\nKritix Voice Intelligence Engine Team`
-
-### 6. 📖 Personalized Custom Dictionary
-* Register custom jargon, brand names, and phonetic sound-alikes (*"critics"* → *"Kritix"*, *"towel"* → *"Tauri"*) to bias STT transcription and LLM auto-correction.
-
-### 7. 🌐 Live Translation Engine (100+ Languages)
-* Real-time spoken translation into English, Hindi, Spanish, French, German, Japanese, Chinese, Russian, Arabic, etc.
+1. **⌨️ Full-Featured QWERTY Keyboard**:
+   - Dedicated toggleable number row (`123`) above QWERTY.
+   - Long-press alternate symbols on every key (`q`➔`1`, `w`➔`2`, `a`➔`@`, `s`➔`#`, `m`➔`?`).
+   - Shift, Caps Lock, Comma, Dot, and Action Enter key (`↵`).
+   - Clean **Material Design Vector Icons** (`ic_clipboard`, `ic_emoji`, `ic_sparkle`, `ic_backspace`, `ic_search`).
+2. **🧠 Case-Aware Autocorrect & Contextual Bigrams**:
+   - **Intelligent Casing**: Preserves user input case in mid-sentence (`the`, `that`) and only capitalizes at sentence starts (`. `, `? `, `! `, `\n`).
+   - **Grammar Corrections**: Instantly fixes `dont` ➔ `don't`, `im` ➔ `I'm`, `teh` ➔ `the`, `recieve` ➔ `receive`, `critics` ➔ `Kritix`.
+   - **Next-Word Bigrams**: Context-driven predictions (e.g., `how ` suggests `are`, `is`, `about`; `thank ` suggests `you`, `so`, `much`).
+3. **😍 500+ Emojis with Real-Time Search**:
+   - 8 rich categories: Smileys (110+), Gestures (60+), Hearts (40+), Fire/Vibes (55+), Animals (80+), Food (70+), Travel (60+), Objects (60+).
+   - Real-time search bar (`🔍 Search emoji...`) filters matching emojis dynamically as you type (`love`, `fire`, `dog`, `pizza`, `laugh`, etc.).
+4. **🗣️ Real-Time Voice Editing Commands**:
+   - Hands-free speech editing without touching the screen:
+     - *"Delete that"* / *"Scratch that"* ➔ Deletes the last spoken word/phrase.
+     - *"Delete last sentence"* ➔ Wipes back to the previous sentence boundary.
+     - *"Clear all"* ➔ Clears the active input field.
+     - *"New line"* / *"Enter"* ➔ Inserts a paragraph break.
+     - *"Make this formal"* / *"Make this casual"* ➔ Rewrites text on-the-fly.
+5. **✨ Quick AI Actions & Per-App Tone**:
+   - Sparkle icon expands into instant AI quick action chips: `[Formal]`, `[Casual]`, `[Shorten]`, `[To English]`.
+   - Automatically adapts tone: **Casual** in WhatsApp/Instagram/Telegram, **Formal** in Gmail/LinkedIn/Slack/Teams.
+6. **📋 Multi-Item Clipboard History Drawer**:
+   - Intercepts system clipboard and stores recent copy items as quick-tap chips.
+7. **🎙️ Dual Input Options**:
+   - Use the embedded keyboard mic key or launch the draggable **Floating Mic Bubble** over any app.
 
 ---
 
 ## 🏗️ System Architecture
 
 ```
-                                ┌─────────────────────────────────────────┐
-                                │     OS Kernel & Active Target Apps      │
-                                │  (Chrome, VS Code, Slack, Notes, Word)  │
-                                └────────────────────┬────────────────────┘
-                                                     │
-                 ┌───────────────────────────────────┴───────────────────────────────────┐
-                 │                                                                       │
-                 ▼                                                                       ▼
-   ┌───────────────────────────┐                                           ┌───────────────────────────┐
-   │    Global Hotkey Engine   │                                           │  Accessibility Context    │
-   │ Windows: WH_KEYBOARD_LL   │                                           │ Windows: IUIAutomation    │
-   │ macOS: CGEventTap (⌘+⌥+R) │                                           │ macOS: AXUIElement        │
-   └─────────────┬─────────────┘                                           └─────────────┬─────────────┘
-                 │                                                                       │
-                 └───────────────────────────────────┬───────────────────────────────────┘
-                                                     │
-                                                     ▼
-                                      ┌─────────────────────────────┐
-                                      │     Rust Tauri v2 Core      │
-                                      │   (eraseAndInject Bridge)   │
-                                      └──────────────┬──────────────┘
-                                                     │
-                                                     ▼
-                                      ┌─────────────────────────────┐
-                                      │   Qwen2.5-1.5B Auto-Edit    │
-                                      │ & Voice Snippets Engine     │
-                                      └──────────────┬──────────────┘
-                                                     │
-                                                     ▼
-                                      ┌─────────────────────────────┐
-                                      │   Compact Floating Mic Pill │
-                                      │    Overlay (React + Vite)   │
-                                      └──────────────┬──────────────┘
+                                  ┌─────────────────────────────────────────┐
+                                  │      Target Applications (OS Level)     │
+                                  │ (Chrome, WhatsApp, Gmail, Slack, Word)  │
+                                  └────────────────────┬────────────────────┘
+                                                       │
+                   ┌───────────────────────────────────┴───────────────────────────────────┐
+                   │                                                                       │
+                   ▼ (Desktop: Windows / macOS)                                            ▼ (Android Mobile)
+    ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
+    │  Tauri v2 + Rust Core Engine  │                                       │   Native Kotlin IME Service   │
+    │  - WH_KEYBOARD_LL / CGEventTap│                                       │   - Full QWERTY + Number Row  │
+    │  - IUIAutomation / AXUIElement│                                       │   - 500+ Emojis with Search   │
+    │  - Floating Mic Pill Overlay  │                                       │   - Clipboard History Drawer  │
+    └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
+                   │                                                                       │
+                   ▼                                                                       ▼
+    ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
+    │  Whisper.cpp / Large-v3 Turbo │                                       │  NVIDIA Parakeet ONNX / STT   │
+    │  On-Device Speech-to-Text     │                                       │  Realtime Audio Streaming     │
+    └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
+                   │                                                                       │
+                   ▼                                                                       ▼
+    ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
+    │  Qwen2.5-1.5B / SmolLM2 Edge  │                                       │  SmolLM2-360M On-Device LLM  │
+    │  Grammar, Tone & Auto-Edit    │                                       │  Voice Commands & AI Polish   │
+    └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
+                   │                                                                       │
+                   └───────────────────────────────────┬───────────────────────────────────┘
+                                                       │
+                                                       ▼
+                                  ┌─────────────────────────────────────────┐
+                                  │    Differential Injected Final Text     │
+                                  │       Clean, Polished & In-Context      │
+                                  └─────────────────────────────────────────┘
 ```
 
 ---
@@ -120,51 +169,60 @@ KVIE reads surrounding text context and executes intelligent real-time auto-edit
 ## 📦 Quick Start & Installation
 
 ### Prerequisites
-* **macOS** (11.0+ Big Sur / Monterey / Ventura / Sonoma / Sequoia on Apple Silicon or Intel) or **Windows** (10/11)
 * **Node.js** (v18+) & **npm**
-* **Rust** (1.75+) with `cargo`
-* **Ollama** (Optional for local Qwen2.5 execution: `ollama run qwen2.5:1.5b`)
+* **Rust** (v1.75+) with `cargo`
+* **Android SDK & NDK** (for Android build): Android Studio with SDK Platform 29+, NDK 30+
+* **JDK 21**
 
-### Build & Run Locally
+---
+
+### 🖥️ Run Desktop App (Windows / macOS)
 
 ```bash
-# 1. Clone Repository
+# 1. Clone the repository
 git clone https://github.com/Aryan-sourcee/KVIE.git
 cd KVIE
 
-# 2. Install Frontend Dependencies
+# 2. Install dependencies
 npm install
 
-# 3. Check Rust Compilation
-cd src-tauri
-cargo check
-cd ..
-
-# 4. Run KVIE Desktop Application
+# 3. Launch desktop app in development mode
 npm run tauri:dev
+
+# 4. Package desktop installer
+npm run tauri:build:win   # Windows (.exe & .msi)
+npm run tauri:build:mac   # macOS (.dmg & .app)
 ```
 
-### Packaging & Releases
+---
+
+### 📱 Run Android App & Keyboard
 
 ```bash
-# Build for macOS (.dmg and .app bundle)
-npm run tauri:build:mac
+# 1. Connect Android device with USB Debugging enabled
+adb devices
 
-# Build for Windows (.exe NSIS installer and .msi)
-npm run tauri:build:win
+# 2. Launch Android development workflow
+npm run android:dev
+
+# 3. Or build standalone APK using Gradle
+cd src-tauri/gen/android
+./gradlew assembleArm64Debug
 ```
 
-> [!NOTE]
-> **macOS Permissions**: When running on macOS for the first time, grant **Accessibility** permissions in `System Settings > Privacy & Security > Accessibility` to allow KVIE to read focused context and perform auto-injection.
+> [!TIP]
+> After installing on Android:
+> 1. Open **KVIE** and follow the 1-tap setup guide to enable **KVIE AI Voice Keyboard** in *Settings > System > Languages & Input*.
+> 2. Enable **KVIE Realtime Typing** in *Accessibility* for universal direct auto-injection across WhatsApp, Chrome, and all third-party apps.
 
 ---
 
 ## 📄 License
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more details.
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
 
 ---
 
 <p align="center">
-  Developed with ❤️ by the <b>Kritix Open-Source Team</b>.
+  Crafted with ❤️ by the <b>Kritix Open-Source Team</b>.
 </p>
