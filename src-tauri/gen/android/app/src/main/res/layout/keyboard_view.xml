@@ -7,26 +7,26 @@
     android:background="#0E0E13"
     android:paddingStart="4dp"
     android:paddingEnd="4dp"
-    android:paddingTop="4dp"
-    android:paddingBottom="10dp">
+    android:paddingTop="3dp"
+    android:paddingBottom="8dp">
 
     <!-- ───────────── TOP AI VOICE & ACTIONS TOOLBAR ───────────── -->
     <LinearLayout
         android:id="@+id/voiceToolbar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="46dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="#15151E"
         android:paddingStart="6dp"
         android:paddingEnd="6dp"
-        android:layout_marginBottom="4dp">
+        android:layout_marginBottom="3dp">
 
-        <!-- Voice Mic Button (44x44dp) -->
+        <!-- Voice Mic Button (40x40dp) -->
         <ImageButton
             android:id="@+id/micButton"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="@drawable/mic_toolbar_btn_bg"
             android:contentDescription="Voice dictation"
             android:src="@android:drawable/ic_btn_speak_now"
@@ -46,7 +46,7 @@
             android:text="KVIE AI Voice"
             android:textColor="#D7FB52"
             android:textStyle="bold"
-            android:textSize="12.5sp"
+            android:textSize="12sp"
             android:visibility="gone" />
 
         <!-- Interactive Next-Word & Autocorrect Candidate Bar (Visible when typing) -->
@@ -57,8 +57,8 @@
             android:layout_weight="1"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginStart="6dp"
-            android:layout_marginEnd="6dp">
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp">
 
             <TextView
                 android:id="@+id/suggestion1"
@@ -69,7 +69,7 @@
                 android:background="@drawable/suggestion_pill_bg"
                 android:text="the"
                 android:textColor="#A0A0B2"
-                android:textSize="12.5sp"
+                android:textSize="13sp"
                 android:singleLine="true"
                 android:ellipsize="end"
                 android:clickable="true"
@@ -102,64 +102,138 @@
                 android:background="@drawable/suggestion_pill_bg"
                 android:text="I"
                 android:textColor="#A0A0B2"
-                android:textSize="12.5sp"
+                android:textSize="13sp"
                 android:singleLine="true"
                 android:ellipsize="end"
                 android:clickable="true"
                 android:focusable="false" />
         </LinearLayout>
 
-        <!-- Clipboard History Quick Button -->
-        <TextView
+        <!-- AI Quick Actions Bar (Toggleable on tap of Sparkle) -->
+        <HorizontalScrollView
+            android:id="@+id/aiActionsBar"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/chipToneFormal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="28dp"
+                    android:gravity="center"
+                    android:background="@drawable/suggestion_pill_bg"
+                    android:text="Formal"
+                    android:textColor="#00E5FF"
+                    android:textStyle="bold"
+                    android:textSize="11.5sp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:layout_marginEnd="4dp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/chipToneCasual"
+                    android:layout_width="wrap_content"
+                    android:layout_height="28dp"
+                    android:gravity="center"
+                    android:background="@drawable/suggestion_pill_bg"
+                    android:text="Casual"
+                    android:textColor="#D7FB52"
+                    android:textStyle="bold"
+                    android:textSize="11.5sp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:layout_marginEnd="4dp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/chipToneShorten"
+                    android:layout_width="wrap_content"
+                    android:layout_height="28dp"
+                    android:gravity="center"
+                    android:background="@drawable/suggestion_pill_bg"
+                    android:text="Shorten"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11.5sp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:layout_marginEnd="4dp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/chipToneTranslate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="28dp"
+                    android:gravity="center"
+                    android:background="@drawable/suggestion_pill_bg"
+                    android:text="To English"
+                    android:textColor="#FFB74D"
+                    android:textSize="11.5sp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:layout_marginEnd="4dp"
+                    android:clickable="true"
+                    android:focusable="false" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- AI Sparkle Polish Toggle Button (UI Library Vector Icon) -->
+        <ImageView
+            android:id="@+id/polishButton"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_sparkle"
+            android:contentDescription="AI Polish and Tone"
+            android:scaleType="centerInside"
+            android:padding="5dp"
+            android:clickable="true"
+            android:focusable="false" />
+
+        <!-- Clipboard History Button (UI Library Vector Icon) -->
+        <ImageView
             android:id="@+id/btnClipboard"
             android:layout_width="32dp"
             android:layout_height="32dp"
-            android:gravity="center"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:text="📋"
-            android:textSize="14sp"
+            android:src="@drawable/ic_clipboard"
             android:contentDescription="Clipboard History"
+            android:scaleType="centerInside"
+            android:padding="6dp"
             android:clickable="true"
             android:focusable="false" />
 
         <!-- Number Row Toggle Button -->
         <TextView
             android:id="@+id/btnNumberRowToggle"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:gravity="center"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:text="123"
-            android:textColor="#8E8E9E"
+            android:textColor="#00E5FF"
             android:textStyle="bold"
             android:textSize="11sp"
             android:contentDescription="Toggle Number Row"
             android:clickable="true"
             android:focusable="false" />
 
-        <!-- SmolLM2 AI Polish Button -->
-        <TextView
-            android:id="@+id/polishButton"
-            android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:gravity="center"
-            android:background="@drawable/key_special_bg"
-            android:text="✨ Polish"
-            android:textColor="#FFFFFF"
-            android:textStyle="bold"
-            android:textSize="11sp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:layout_marginStart="2dp"
-            android:layout_marginEnd="2dp"
-            android:clickable="true"
-            android:focusable="false" />
-
-        <!-- Switch IME Globe Button -->
+        <!-- Switch IME Button -->
         <ImageButton
             android:id="@+id/switchKeyboardButton"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="Switch input method"
             android:src="@android:drawable/ic_menu_more"
@@ -177,7 +251,7 @@
         android:background="#121218"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:layout_marginBottom="4dp"
+        android:layout_marginBottom="3dp"
         android:visibility="gone">
 
         <TextView
@@ -208,7 +282,7 @@
         <TextView
             android:id="@+id/btnClearClipboard"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
+            android:layout_height="26dp"
             android:gravity="center"
             android:background="@drawable/key_special_bg"
             android:text="Clear"
@@ -231,10 +305,10 @@
         <LinearLayout
             android:id="@+id/rowNumbers"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="38dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="3dp" />
 
         <!-- ROW 1: Q W E R T Y U I O P -->
         <LinearLayout
@@ -243,7 +317,7 @@
             android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="3dp" />
 
         <!-- ROW 2: A S D F G H J K L -->
         <LinearLayout
@@ -252,9 +326,9 @@
             android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:layout_marginBottom="4dp" />
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:layout_marginBottom="3dp" />
 
         <!-- ROW 3: [SHIFT] Z X C V B N M [BACKSPACE] -->
         <LinearLayout
@@ -263,7 +337,7 @@
             android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="4dp">
+            android:layout_marginBottom="3dp">
 
             <TextView
                 android:id="@+id/keyShift"
@@ -289,24 +363,24 @@
                 android:orientation="horizontal"
                 android:gravity="center" />
 
-            <TextView
+            <!-- Backspace Key with UI Vector Icon -->
+            <ImageView
                 android:id="@+id/keyBackspace"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
-                android:gravity="center"
                 android:background="@drawable/key_special_bg"
-                android:text="⌫"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp"
-                android:textStyle="bold"
+                android:src="@drawable/ic_backspace"
+                android:contentDescription="Backspace"
+                android:scaleType="centerInside"
+                android:padding="12dp"
                 android:clickable="true"
                 android:focusable="false" />
         </LinearLayout>
 
-        <!-- ROW 4: [?123] [😊 Emoji] [,] [ SPACE (KVIE) ] [.] [ENTER ↵] -->
+        <!-- ROW 4: [?123] [Emoji Icon] [,] [ SPACE (KVIE) ] [.] [ENTER ↵] -->
         <LinearLayout
             android:id="@+id/row4"
             android:layout_width="match_parent"
@@ -330,18 +404,19 @@
                 android:clickable="true"
                 android:focusable="false" />
 
-            <!-- Dedicated Emoji Key -->
-            <TextView
+            <!-- Dedicated Emoji Key with UI Vector Icon -->
+            <ImageView
                 android:id="@+id/keyEmoji"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
-                android:gravity="center"
                 android:background="@drawable/key_special_bg"
-                android:text="😊"
-                android:textSize="16sp"
+                android:src="@drawable/ic_emoji"
+                android:contentDescription="Emoji Keyboard"
+                android:scaleType="centerInside"
+                android:padding="12dp"
                 android:clickable="true"
                 android:focusable="false" />
 
@@ -411,69 +486,158 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- ───────────── EMOJI KEYBOARD DRAWER ───────────── -->
+    <!-- ───────────── EMOJI KEYBOARD DRAWER WITH SEARCH ───────────── -->
     <LinearLayout
         android:id="@+id/emojiDrawer"
         android:layout_width="match_parent"
-        android:layout_height="220dp"
+        android:layout_height="240dp"
         android:orientation="vertical"
         android:background="#101017"
         android:visibility="gone">
 
-        <!-- Category Selector Tabs -->
+        <!-- Emoji Search Box -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="36dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:background="#161622"
+            android:background="#1A1A26"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp"
             android:paddingStart="8dp"
             android:paddingEnd="8dp">
 
-            <TextView
-                android:id="@+id/tabSmiley"
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_search"
+                android:contentDescription="Search"
+                android:layout_marginEnd="6dp" />
+
+            <EditText
+                android:id="@+id/emojiSearchInput"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:gravity="center"
-                android:text="😀"
-                android:textSize="16sp"
-                android:clickable="true"
-                android:focusable="false" />
+                android:background="@null"
+                android:hint="Search emoji (love, fire, dog, smile)..."
+                android:textColorHint="#6B6B7F"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:imeOptions="actionDone" />
 
             <TextView
-                android:id="@+id/tabGestures"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
+                android:id="@+id/btnClearEmojiSearch"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
                 android:gravity="center"
-                android:text="👍"
-                android:textSize="16sp"
-                android:clickable="true"
-                android:focusable="false" />
-
-            <TextView
-                android:id="@+id/tabHearts"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="❤️"
-                android:textSize="16sp"
-                android:clickable="true"
-                android:focusable="false" />
-
-            <TextView
-                android:id="@+id/tabFire"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="🔥"
-                android:textSize="16sp"
+                android:text="✕"
+                android:textColor="#8E8E9E"
+                android:textSize="12sp"
+                android:visibility="gone"
                 android:clickable="true"
                 android:focusable="false" />
         </LinearLayout>
+
+        <!-- Category Selector Tabs -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:scrollbars="none"
+            android:background="#161622">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp">
+
+                <TextView
+                    android:id="@+id/tabSmiley"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="😀"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabGestures"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="👍"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabHearts"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="❤️"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabFire"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="🔥"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabAnimals"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="🐶"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabFood"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="🍕"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabTravel"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="🚗"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tabObjects"
+                    android:layout_width="44dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="💡"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="false" />
+            </LinearLayout>
+        </HorizontalScrollView>
 
         <!-- Scrollable Grid of Emojis -->
         <ScrollView
@@ -487,13 +651,13 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:columnCount="7"
-                android:padding="6dp" />
+                android:padding="4dp" />
         </ScrollView>
 
         <!-- Emoji Bottom Control Bar (Return to ABC & Backspace) -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="40dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:background="#161622"
@@ -503,13 +667,13 @@
             <TextView
                 android:id="@+id/btnReturnToAbc"
                 android:layout_width="70dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="ABC"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:clickable="true"
                 android:focusable="false" />
 
@@ -518,16 +682,16 @@
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
-            <TextView
+            <!-- Emoji Backspace Key with UI Vector Icon -->
+            <ImageView
                 android:id="@+id/btnEmojiBackspace"
-                android:layout_width="60dp"
-                android:layout_height="34dp"
-                android:gravity="center"
+                android:layout_width="54dp"
+                android:layout_height="32dp"
                 android:background="@drawable/key_special_bg"
-                android:text="⌫"
-                android:textColor="#FFFFFF"
-                android:textSize="18sp"
-                android:textStyle="bold"
+                android:src="@drawable/ic_backspace"
+                android:contentDescription="Backspace"
+                android:scaleType="centerInside"
+                android:padding="8dp"
                 android:clickable="true"
                 android:focusable="false" />
         </LinearLayout>

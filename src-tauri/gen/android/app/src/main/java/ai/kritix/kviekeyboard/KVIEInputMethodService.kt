@@ -16,14 +16,19 @@ import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.widget.EditText
 import android.widget.GridLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -35,12 +40,13 @@ import kotlinx.coroutines.launch
 /**
  * KVIE Next-Gen AI Voice & QWERTY Keyboard Input Method Service.
  * Flagship Features:
- * 1. Full QWERTY with Dedicated Number Row & Long-Press Alt-Symbols (q->1, w->2, a->@, etc.)
- * 2. Real-Time Autocorrect & Next-Word 3-Candidate Suggestion Bar
+ * 1. Full QWERTY with Number Row Toggle & Long-Press Alt-Symbols (q->1, w->2, a->@, etc.)
+ * 2. Real-Time Autocorrect & Contextual Next-Word 3-Candidate Suggestion Bar (Case-Aware)
  * 3. Native Multi-Item Clipboard History Drawer
- * 4. Full Emoji Keyboard Drawer (Smileys, Gestures, Hearts, Vibes)
- * 5. Instant 1-Tap AI Voice Dictation & SmolLM2-360M Polish
- * 6. Dual Tactile Haptic & Acoustic Mechanical Key Click Feedback
+ * 4. Massive 500+ Emoji Drawer with Real-Time Search across 8 Categories
+ * 5. Instant 1-Tap AI Voice Dictation with 6 Voice Editing Commands
+ * 6. Quick AI Action Chips (Formal, Casual, Shorten, To English) & Per-App Tone Defaults
+ * 7. Dual Tactile Haptic & Acoustic Mechanical Key Click Feedback
  */
 class KVIEInputMethodService : InputMethodService() {
 
@@ -59,12 +65,17 @@ class KVIEInputMethodService : InputMethodService() {
     private lateinit var voiceToolbar: LinearLayout
     private lateinit var statusText: TextView
     private lateinit var micButton: ImageButton
-    private lateinit var polishButton: TextView
+    private lateinit var polishButton: ImageView
     private lateinit var suggestionBar: LinearLayout
     private lateinit var suggestion1: TextView
     private lateinit var suggestion2: TextView
     private lateinit var suggestion3: TextView
-    private lateinit var btnClipboard: TextView
+    private lateinit var aiActionsBar: HorizontalScrollView
+    private lateinit var chipToneFormal: TextView
+    private lateinit var chipToneCasual: TextView
+    private lateinit var chipToneShorten: TextView
+    private lateinit var chipToneTranslate: TextView
+    private lateinit var btnClipboard: ImageView
     private lateinit var btnNumberRowToggle: TextView
 
     // Clipboard Drawer
@@ -82,8 +93,8 @@ class KVIEInputMethodService : InputMethodService() {
     private lateinit var row3Letters: LinearLayout
     private lateinit var keyShift: TextView
     private lateinit var keySymbols: TextView
-    private lateinit var keyEmoji: TextView
-    private lateinit var keyBackspace: TextView
+    private lateinit var keyEmoji: ImageView
+    private lateinit var keyBackspace: ImageView
     private lateinit var keySpace: TextView
     private lateinit var keyDot: TextView
     private lateinit var keyComma: TextView
@@ -92,12 +103,19 @@ class KVIEInputMethodService : InputMethodService() {
     // Emoji Drawer
     private lateinit var emojiDrawer: LinearLayout
     private lateinit var emojiGrid: GridLayout
+    private lateinit var emojiSearchInput: EditText
+    private lateinit var btnClearEmojiSearch: TextView
     private lateinit var tabSmiley: TextView
     private lateinit var tabGestures: TextView
     private lateinit var tabHearts: TextView
     private lateinit var tabFire: TextView
+    private lateinit var tabAnimals: TextView
+    private lateinit var tabFood: TextView
+    private lateinit var tabTravel: TextView
+    private lateinit var tabObjects: TextView
     private lateinit var btnReturnToAbc: TextView
-    private lateinit var btnEmojiBackspace: TextView
+    private lateinit var btnEmojiBackspace: ImageView
+    private var currentActiveEmojiCategory: List<String> = emptyList()
 
     private val numberKeys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
     private val alphabetKeysRow1 = listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")
@@ -121,40 +139,196 @@ class KVIEInputMethodService : InputMethodService() {
         "n" to "!", "m" to "?"
     )
 
+    // High-Frequency 2, 3, 4+ letter conversational vocabulary + Hinglish & Brands
     private val commonWords = listOf(
-        "the", "be", "to", "of", "and", "a", "in", "that", "have", "I",
-        "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
-        "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
-        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
-        "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
-        "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
-        "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
-        "than", "then", "now", "look", "only", "come", "its", "over", "think", "also",
-        "back", "after", "use", "two", "how", "our", "work", "first", "well", "way",
-        "even", "new", "want", "because", "any", "these", "give", "day", "most", "us",
-        "Kritix", "KVIE", "hello", "thanks", "please", "yes", "sure", "great", "awesome", "today",
-        "tomorrow", "yesterday", "meeting", "call", "send", "message", "okay", "done", "fine", "cool",
-        "bhai", "kya", "ha", "nahi", "accha", "theek", "kaise", "kaha", "chalo", "ab", "kab"
+        // 2-letter
+        "am", "an", "as", "at", "be", "by", "do", "go", "he", "hi", "if", "in", "is", "it",
+        "me", "my", "no", "of", "ok", "on", "or", "so", "to", "up", "us", "we",
+        // 3-letter
+        "all", "and", "any", "app", "are", "bad", "big", "boy", "bus", "but", "bye", "can",
+        "car", "cat", "day", "did", "dog", "end", "far", "few", "for", "fun", "get", "got",
+        "guy", "had", "has", "her", "hey", "him", "his", "hot", "how", "job", "let", "lot",
+        "man", "may", "new", "not", "now", "off", "old", "one", "our", "out", "pay", "put",
+        "red", "run", "say", "see", "set", "she", "sir", "six", "sun", "ten", "the", "top",
+        "try", "two", "use", "war", "way", "who", "why", "win", "yes", "yet", "you",
+        // 4+ letter common English
+        "about", "after", "again", "also", "always", "another", "around", "ask", "awesome",
+        "back", "because", "before", "best", "better", "between", "both", "call", "came",
+        "change", "check", "come", "cool", "could", "done", "down", "each", "even", "every",
+        "feel", "find", "fine", "first", "from", "give", "going", "good", "great", "group",
+        "have", "help", "here", "home", "hope", "into", "just", "keep", "kind", "know",
+        "last", "later", "leave", "life", "like", "line", "little", "live", "look", "love",
+        "make", "many", "meeting", "message", "might", "more", "most", "much", "must",
+        "name", "need", "never", "next", "night", "nothing", "number", "office", "okay",
+        "only", "other", "over", "part", "people", "place", "play", "please", "point",
+        "problem", "right", "same", "school", "seem", "send", "should", "show", "side",
+        "small", "some", "something", "soon", "sorry", "start", "still", "such", "sure",
+        "take", "talk", "tell", "than", "thank", "thanks", "that", "their", "them", "then",
+        "there", "these", "they", "thing", "think", "this", "those", "through", "time",
+        "today", "together", "tomorrow", "under", "very", "wait", "want", "water", "well",
+        "went", "what", "when", "where", "which", "while", "white", "will", "with", "word",
+        "work", "world", "would", "write", "year", "yesterday", "your",
+        // Hinglish & Everyday Indian Context
+        "Kritix", "KVIE", "bhai", "kya", "ha", "nahi", "accha", "theek", "kaise", "kaha",
+        "chalo", "ab", "kab", "aaj", "kal", "kar", "karo", "karna", "bolo", "bol", "dekh",
+        "dekho", "sun", "suno", "aao", "jao", "mera", "meri", "hum", "tum", "aap", "yaar"
     )
 
-    // Emoji Catalogs
+    // Typo, Brand & Grammar Auto-Correction Map
+    private val grammarCorrections = mapOf(
+        "teh" to "the",
+        "recieve" to "receive",
+        "recieved" to "received",
+        "seperate" to "separate",
+        "untill" to "until",
+        "truely" to "truly",
+        "definately" to "definitely",
+        "alot" to "a lot",
+        "dont" to "don't",
+        "cant" to "can't",
+        "wont" to "won't",
+        "didnt" to "didn't",
+        "isnt" to "isn't",
+        "arent" to "aren't",
+        "wasnt" to "wasn't",
+        "werent" to "weren't",
+        "im" to "I'm",
+        "ive" to "I've",
+        "id" to "I'd",
+        "ill" to "I'll",
+        "youre" to "you're",
+        "theyre" to "they're",
+        "weve" to "we've",
+        "hes" to "he's",
+        "shes" to "she's",
+        "thats" to "that's",
+        "whats" to "what's",
+        "critics" to "Kritix", "critic" to "Kritix", "kritiks" to "Kritix",
+        "kritik" to "Kritix", "kritcs" to "Kritix", "kritic" to "Kritix", "critis" to "Kritix",
+        "kvie" to "KVIE", "tauri" to "Tauri"
+    )
+
+    // Contextual Bigram Next-Word Prediction Map
+    private val bigramContext = mapOf(
+        "how" to listOf("are", "is", "about"),
+        "thank" to listOf("you", "so", "much"),
+        "thanks" to listOf("for", "a", "lot"),
+        "let" to listOf("me", "us", "know"),
+        "can" to listOf("you", "we", "I"),
+        "i" to listOf("am", "will", "have"),
+        "what" to listOf("is", "are", "do"),
+        "where" to listOf("are", "is", "were"),
+        "when" to listOf("will", "is", "can"),
+        "why" to listOf("did", "is", "are"),
+        "good" to listOf("morning", "night", "luck"),
+        "see" to listOf("you", "it", "later"),
+        "call" to listOf("me", "you", "back"),
+        "please" to listOf("let", "check", "send"),
+        "are" to listOf("you", "we", "they"),
+        "is" to listOf("this", "it", "that"),
+        "do" to listOf("you", "not", "we"),
+        "you" to listOf("are", "can", "have"),
+        "we" to listOf("are", "will", "can"),
+        "they" to listOf("are", "will", "were"),
+        "it" to listOf("is", "was", "will"),
+        "this" to listOf("is", "was", "will"),
+        "bhai" to listOf("kya", "kaha", "bol"),
+        "kya" to listOf("hua", "hai", "kar"),
+        "theek" to listOf("hai", "h", "bhai"),
+        "kaise" to listOf("ho", "kare", "hoga"),
+        "aap" to listOf("kaise", "kaha", "kya")
+    )
+
+    // ───────────── MASSIVE EMOJI CATALOGS (500+ EMOJIS) ─────────────
     private val smileyEmojis = listOf(
-        "😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😌","😍","🥰","😘","😗","😙","😚",
-        "😋","😛","😝","😜","🤪","🤨","🧐","🤓","😎","🤩","🥳","😏","😒","😞","😔","😟","😕","🙁","😣","😖",
-        "😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨","😰","😥","😓","🤗","🤔",
-        "🤭","🤫","🤥","😶","😐","😑","😬","🙄","😯","😦","😧","😮","😲","🥱","😴","🤤","😪","😵","🤐","🥴"
+        "😀","😃","😄","😁","😆","😅","😂","🤣","🥲","🥹","😊","😇","🙂","🙃","😉","😌","😍","🥰","😘","😗",
+        "😙","😚","😋","😛","😝","😜","🤪","🤨","🧐","🤓","😎","🥸","🤩","🥳","😏","😒","😞","😔","😟","😕",
+        "🙁","☹️","😣","😖","😫","😩","🥺","😢","😭","😮‍💨","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨",
+        "😰","😥","😓","🤗","🤔","🫣","🤭","🫢","🤫","🤥","😶","😶‍🌫️","😐","😑","😬","🫨","🫠","🙄","😯","😦",
+        "😧","😮","😲","🥱","😴","🤤","😪","😵","😵‍💫","🤐","🥴","🤢","🤮","🤧","😷","🤒","🤕","🤑","🤠","😈",
+        "👿","💀","☠️","👽","👾","🤖","🎃","😺","😸","😹","😻","😼","😽","🙀","😿","😾"
     )
+
     private val gestureEmojis = listOf(
-        "👍","👎","👌","✌️","🤞","🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","👋","🤚","🖐️","✋","🖖","👏",
-        "🙌","👐","🤲","🤝","🙏","✍️","💅","🤳","💪","🦾","🦿","🦵","🦶","👂","🦻","👃","🧠","🫀","🫁","🦷"
+        "👍","👎","👌","🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","🫵","👋","🤚",
+        "🖐️","✋","🖖","🫱","🫲","🫸","🫷","👏","🙌","🫶","👐","🤲","🤝","🙏","✍️","💅","🤳","💪","🦾","🦿",
+        "🦵","🦶","👂","🦻","👃","🧠","🫀","🫁","🦷","🦴","👀","👁️","👅","👄","🫦","💋","🫂"
     )
+
     private val heartEmojis = listOf(
-        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝","💟","💌",
-        "💋","💯","💢","💥","💫","💦","💨","🕳️","💣","💬","👁️‍🗨️","🗨️","🗯️","💭","💤"
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❤️‍🔥","❤️‍🩹","❣️","💕","💞","💓","💗","💖","💘","💝",
+        "💟","💌","💋","💯","💢","💥","💫","💦","💨","🕳️","💣","💬","👁️‍🗨️","🗨️","🗯️","💭","💤","✨","⭐","🌟"
     )
+
     private val fireEmojis = listOf(
-        "🔥","✨","⭐","🌟","⚡","🎉","🎊","🚀","🏆","🥇","👑","💎","🎯","🔮","💡","📌","🔑","🔔","📢","🎵",
-        "🎶","🎤","🎧","🎮","🕹️","🎲","🧩","🎨","🎬","📸","💻","📱","⌚","💰","💵","💸","🎁"
+        "🔥","✨","⭐","🌟","⚡","🎉","🎊","🚀","🏆","🥇","🥈","🥉","👑","💎","🎯","🔮","💡","📌","🔑","🔔",
+        "📢","🎵","🎶","🎤","🎧","🎮","🕹️","🎲","🧩","🎨","🎬","📸","💻","📱","⌚","💰","💵","💸","🎁","🧨",
+        "🎈","🎆","🎇","🥂","🍻","🍾","🏅","🎖️","🪄","🪅","🏮","🪙"
+    )
+
+    private val animalEmojis = listOf(
+        "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔","🐧","🐦","🐤",
+        "🦆","🦅","🦉","🦇","🐺","🐗","🐴","🦄","🐝","🪱","🐛","🦋","🐌","🐞","🐜","🪰","🪲","🪳","🦟","🦗",
+        "🕷️","🦂","🐢","🐍","🦎","🐙","🦑","🦐","🦞","🦀","🐡","🐠","🐟","🐬","🐳","🐋","🦈","🐊","🐅","🐆",
+        "🦓","🦍","🦧","🐘","🦛","🦏","🐪","🐫","🦒","🦘","🦬","🐃","🐂","🐄","🐎","🐖","🐏","🐑","🦙","🐐"
+    )
+
+    private val foodEmojis = listOf(
+        "🍕","🍔","🍟","🌭","🍿","🥓","🍳","🧇","🥞","🥪","🥗","🍱","🍣","🍜","🍩","🍫","🍰","🍦","🍨","🍧",
+        "🍪","🎂","🧁","🥧","🍮","🍭","🍬","🍫","🍿","🧈","🧂","🥫","🍲","🥘","🥣","🥗","🥪","🌯","🌮","🧆",
+        "🥟","🥠","🥡","🍙","🍚","🍘","🍢","🍡","🍧","🍨","🍦","☕","🧋","🍵","🍶","🍾","🍷","🍸","🍹","🍺",
+        "🍻","🥂","🥃","🥤","🧋","🧃","🧉","🧊"
+    )
+
+    private val travelEmojis = listOf(
+        "🚗","🏎️","🚙","🚕","🚘","🛻","🚌","🚓","🚑","🚒","🚐","🛺","🚜","🛴","🚲","🛵","🏍️","🚨","✈️","🛫",
+        "🛬","🚀","🚁","🛸","⛵","🚤","🛥️","🛳️","🚢","🚂","🚆","🚇","🚊","Station","🏝️","🏔️","🌋","🗽","🗼","🏰",
+        "🌃","🌅","🌄","⛺","⛺","🗺️","🏖️","🏕️","🏠","🏡","🏢","🏬","🏦","🏥","🏨","🏪","🏫","🏭","🏯"
+    )
+
+    private val objectEmojis = listOf(
+        "💡","📱","💻","⌨️","⌚","📷","🔍","🔒","🔑","💰","💳","💎","📦","✉️","📌","⏰","🔋","🛠️","🧰","🪛",
+        "🔧","🔨","⚙️","✂️","📐","📏","📎","🖊️","🖋️","✏️","📝","📁","📂","📅","📊","📈","📉","🗑️","🚪","🛏️",
+        "🛋️","🪑","🧴","🧼","🪥","🪒","🩹","🩺","💉","💊","🔭","🔬","🧪","🧯","🛒","🚬","⚰️","🪦"
+    )
+
+    // Emoji search keywords map for real-time query matching
+    private val emojiKeywords: Map<String, List<String>> = mapOf(
+        "smile" to listOf("😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😌"),
+        "laugh" to listOf("😂","🤣","😆","😄","😃","😁","😹"),
+        "love" to listOf("❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝","💟","💌","😍","🥰","😘"),
+        "heart" to listOf("❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝"),
+        "fire" to listOf("🔥","💥","⚡","🌟","💫","🧨","🥵"),
+        "hot" to listOf("🔥","🥵","☀️","🌶️","♨️"),
+        "cool" to listOf("😎","🥶","🧊","🤙","🕶️"),
+        "cry" to listOf("😭","😢","🥺","😿","💧","😥","😰"),
+        "sad" to listOf("😞","😔","😟","😕","🙁","☹️","😣","😖","😫","😩","🥺","😢","😭"),
+        "angry" to listOf("😠","😡","🤬","😤","👿","💢"),
+        "think" to listOf("🤔","🧐","🤨","💭","💡"),
+        "kiss" to listOf("😘","😗","😙","😚","💋","😽"),
+        "hand" to listOf("👍","👎","👌","✌️","🤞","🤟","🤘","🤙","👈","👉","👆","👇","☝️","👋","🤚","🖐️","✋","🖖","👏","🙌","👐","🤲","🤝","🙏"),
+        "clap" to listOf("👏","🙌","🎉"),
+        "dog" to listOf("🐶","🐕","🦮","🐩","🐾","🐺","🦊"),
+        "cat" to listOf("🐱","🐈","😸","😹","😻","😼","😽","🙀","😿","😾","🦁","🐯"),
+        "food" to listOf("🍕","🍔","🍟","🌭","🍿","🥓","🍳","🧇","🥞","🥪","🥗","🍱","🍣","🍜","🍩","🍫","🍰","🍦","🍧","🍪"),
+        "pizza" to listOf("🍕"),
+        "burger" to listOf("🍔"),
+        "coffee" to listOf("☕","🧋","🍵"),
+        "beer" to listOf("🍻","🍺","🥂","🍷","🍾"),
+        "party" to listOf("🎉","🎊","🥳","🍾","🎈","🎂","🎁"),
+        "money" to listOf("💰","💵","💸","🤑","💳","💎","🪙"),
+        "work" to listOf("💼","💻","⌨️","🖥️","📱","📊","📈","📉","📝"),
+        "car" to listOf("🚗","🏎️","🚙","🚕","🚘","🛻","🚌","🚓","🚑","🚒"),
+        "flight" to listOf("✈️","🛫","🛬","🚀","🚁"),
+        "plane" to listOf("✈️","🛫","🛬"),
+        "star" to listOf("⭐","🌟","✨","💫","🤩","🌠"),
+        "game" to listOf("🎮","🕹️","🎲","🎯","🧩","🎰"),
+        "music" to listOf("🎵","🎶","🎤","🎧","🎸","🎹","🎺","🎻","🥁"),
+        "sport" to listOf("⚽","🏀","🏈","⚾","🎾","🏐","🏉","🎱","🏓","🏸","🥊","🚴","🏋️","🛹"),
+        "ok" to listOf("👌","👍","🙆","🆗","✅"),
+        "yes" to listOf("👍","✅","✔️","☑️","🙌"),
+        "no" to listOf("👎","❌","🚫","🙅","⛔"),
+        "flag" to listOf("🇮🇳","🇺🇸","🇬🇧","🇨🇦","🇦🇺","🇯🇵","🇩🇪","🇫🇷","🇧🇷","🏁")
     )
 
     private val currentKeyButtons = mutableListOf<TextView>()
@@ -187,6 +361,11 @@ class KVIEInputMethodService : InputMethodService() {
         suggestion1 = view.findViewById(R.id.suggestion1)
         suggestion2 = view.findViewById(R.id.suggestion2)
         suggestion3 = view.findViewById(R.id.suggestion3)
+        aiActionsBar = view.findViewById(R.id.aiActionsBar)
+        chipToneFormal = view.findViewById(R.id.chipToneFormal)
+        chipToneCasual = view.findViewById(R.id.chipToneCasual)
+        chipToneShorten = view.findViewById(R.id.chipToneShorten)
+        chipToneTranslate = view.findViewById(R.id.chipToneTranslate)
         btnClipboard = view.findViewById(R.id.btnClipboard)
         btnNumberRowToggle = view.findViewById(R.id.btnNumberRowToggle)
 
@@ -213,12 +392,20 @@ class KVIEInputMethodService : InputMethodService() {
         // Emoji Drawer Views
         emojiDrawer = view.findViewById(R.id.emojiDrawer)
         emojiGrid = view.findViewById(R.id.emojiGrid)
+        emojiSearchInput = view.findViewById(R.id.emojiSearchInput)
+        btnClearEmojiSearch = view.findViewById(R.id.btnClearEmojiSearch)
         tabSmiley = view.findViewById(R.id.tabSmiley)
         tabGestures = view.findViewById(R.id.tabGestures)
         tabHearts = view.findViewById(R.id.tabHearts)
         tabFire = view.findViewById(R.id.tabFire)
+        tabAnimals = view.findViewById(R.id.tabAnimals)
+        tabFood = view.findViewById(R.id.tabFood)
+        tabTravel = view.findViewById(R.id.tabTravel)
+        tabObjects = view.findViewById(R.id.tabObjects)
         btnReturnToAbc = view.findViewById(R.id.btnReturnToAbc)
         btnEmojiBackspace = view.findViewById(R.id.btnEmojiBackspace)
+
+        currentActiveEmojiCategory = smileyEmojis
 
         setupToolbarActions(view)
         setupKeypadActions()
@@ -246,7 +433,35 @@ class KVIEInputMethodService : InputMethodService() {
 
         polishButton.setOnClickListener {
             performKeyHaptic()
-            triggerAIPolish()
+            toggleAiActionsBar()
+        }
+
+        chipToneFormal.setOnClickListener {
+            performKeyHaptic()
+            triggerAIPolish("formal")
+            aiActionsBar.visibility = View.GONE
+            suggestionBar.visibility = View.VISIBLE
+        }
+
+        chipToneCasual.setOnClickListener {
+            performKeyHaptic()
+            triggerAIPolish("casual")
+            aiActionsBar.visibility = View.GONE
+            suggestionBar.visibility = View.VISIBLE
+        }
+
+        chipToneShorten.setOnClickListener {
+            performKeyHaptic()
+            triggerAIPolish("concise")
+            aiActionsBar.visibility = View.GONE
+            suggestionBar.visibility = View.VISIBLE
+        }
+
+        chipToneTranslate.setOnClickListener {
+            performKeyHaptic()
+            triggerAIPolish("english")
+            aiActionsBar.visibility = View.GONE
+            suggestionBar.visibility = View.VISIBLE
         }
 
         btnClipboard.setOnClickListener {
@@ -261,10 +476,10 @@ class KVIEInputMethodService : InputMethodService() {
             btnNumberRowToggle.setTextColor(if (isNumberRowVisible) 0xFF00E5FF.toInt() else 0xFF8E8E9E.toInt())
         }
 
-        view.findViewById<ImageButton>(R.id.switchKeyboardButton).setOnClickListener {
+        view.findViewById<ImageButton>(R.id.switchKeyboardButton)?.setOnClickListener {
             performKeyHaptic()
-            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                .showInputMethodPicker()
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+            imm?.showInputMethodPicker()
         }
 
         suggestion1.setOnClickListener { applySuggestion(suggestion1.text.toString()) }
@@ -272,19 +487,28 @@ class KVIEInputMethodService : InputMethodService() {
         suggestion3.setOnClickListener { applySuggestion(suggestion3.text.toString()) }
     }
 
+    private fun toggleAiActionsBar() {
+        if (aiActionsBar.visibility == View.VISIBLE) {
+            aiActionsBar.visibility = View.GONE
+            suggestionBar.visibility = View.VISIBLE
+        } else {
+            aiActionsBar.visibility = View.VISIBLE
+            suggestionBar.visibility = View.GONE
+        }
+    }
+
     private fun setupKeypadActions() {
         keyShift.setOnClickListener {
             performKeyHaptic()
-            toggleShift()
+            handleShiftKey()
         }
 
         keyShift.setOnLongClickListener {
             performKeyHaptic()
-            if (!isSymbolsMode) {
-                isCapsLock = !isCapsLock
-                isShifted = isCapsLock
-                updateKeyLabels()
-            }
+            isCapsLock = !isCapsLock
+            isShifted = isCapsLock
+            updateShiftKeyVisual()
+            populateKeys()
             true
         }
 
@@ -298,142 +522,138 @@ class KVIEInputMethodService : InputMethodService() {
             showEmojiDrawer()
         }
 
+        keySpace.setOnClickListener {
+            performKeyHaptic()
+            currentInputConnection?.commitText(" ", 1)
+            if (!isCapsLock && isShifted) {
+                isShifted = false
+                updateShiftKeyVisual()
+                populateKeys()
+            }
+            updateSuggestions()
+        }
+
+        keyDot.setOnClickListener {
+            performKeyHaptic()
+            currentInputConnection?.commitText(".", 1)
+            updateSuggestions()
+        }
+
+        keyComma.setOnClickListener {
+            performKeyHaptic()
+            currentInputConnection?.commitText(",", 1)
+            updateSuggestions()
+        }
+
+        keyEnter.setOnClickListener {
+            performKeyHaptic()
+            handleEnterKey()
+        }
+
         setupBackspaceKey()
-
-        keySpace.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                v.isPressed = true
-                performKeyHaptic()
-                currentInputConnection?.commitText(" ", 1)
-                updateSuggestions()
-                true
-            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                v.isPressed = false
-                true
-            } else false
-        }
-
-        keyDot.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                v.isPressed = true
-                performKeyHaptic()
-                currentInputConnection?.commitText(if (isSymbolsMode) "/" else ".", 1)
-                updateSuggestions()
-                true
-            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                v.isPressed = false
-                true
-            } else false
-        }
-
-        keyComma.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                v.isPressed = true
-                performKeyHaptic()
-                currentInputConnection?.commitText(if (isSymbolsMode) "=" else ",", 1)
-                updateSuggestions()
-                true
-            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                v.isPressed = false
-                true
-            } else false
-        }
-
-        keyEnter.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                v.isPressed = true
-                performKeyHaptic()
-                handleEnterKey()
-                true
-            } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                v.isPressed = false
-                true
-            } else false
-        }
     }
 
+    // ───────────── KEY POPULATION & RENDERING ─────────────
     private fun populateNumberRow() {
         rowNumbers.removeAllViews()
         for (num in numberKeys) {
-            val btn = TextView(this).apply {
-                val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                    marginStart = 2
-                    marginEnd = 2
-                }
-                layoutParams = params
-                gravity = Gravity.CENTER
-                setBackgroundResource(R.drawable.key_bg)
-                setTextColor(0xFFFFFFFF.toInt())
-                textSize = 17f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                includeFontPadding = false
-                text = num
-                isClickable = true
-                isFocusable = false
-
-                setOnTouchListener { v, event ->
-                    if (event.action == MotionEvent.ACTION_DOWN) {
-                        v.isPressed = true
-                        performKeyHaptic()
-                        currentInputConnection?.commitText(num, 1)
-                        updateSuggestions()
-                        true
-                    } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                        v.isPressed = false
-                        true
-                    } else false
-                }
+            val keyView = createKeyButton(num, 1.0f)
+            keyView.setOnClickListener {
+                performKeyHaptic()
+                currentInputConnection?.commitText(num, 1)
+                updateSuggestions()
             }
-            rowNumbers.addView(btn)
+            rowNumbers.addView(keyView)
         }
     }
 
     private fun populateKeys() {
+        currentKeyButtons.clear()
         row1.removeAllViews()
         row2.removeAllViews()
         row3Letters.removeAllViews()
-        currentKeyButtons.clear()
 
-        val r1 = when {
-            isSymbolsMode && isSymbolsSecondaryPage -> symbolPage2Row1
-            isSymbolsMode -> symbolKeysRow1
-            else -> alphabetKeysRow1
+        if (isSymbolsMode) {
+            populateSymbols()
+        } else {
+            populateAlphabet()
         }
-        val r2 = when {
-            isSymbolsMode && isSymbolsSecondaryPage -> symbolPage2Row2
-            isSymbolsMode -> symbolKeysRow2
-            else -> alphabetKeysRow2
-        }
-        val r3 = when {
-            isSymbolsMode && isSymbolsSecondaryPage -> symbolPage2Row3
-            isSymbolsMode -> symbolKeysRow3
-            else -> alphabetKeysRow3
-        }
-
-        for (char in r1) {
-            val btn = createKeyButton(char)
-            row1.addView(btn)
-            currentKeyButtons.add(btn)
-        }
-
-        for (char in r2) {
-            val btn = createKeyButton(char)
-            row2.addView(btn)
-            currentKeyButtons.add(btn)
-        }
-
-        for (char in r3) {
-            val btn = createKeyButton(char)
-            row3Letters.addView(btn)
-            currentKeyButtons.add(btn)
-        }
-
-        updateKeyLabels()
+        updateShiftKeyVisual()
     }
 
-    private fun createKeyButton(label: String): TextView {
-        val btn = TextView(this).apply {
-            val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+    private fun populateAlphabet() {
+        keySymbols.text = "?123"
+
+        for (char in alphabetKeysRow1) {
+            val displayChar = if (isShifted || isCapsLock) char.uppercase() else char
+            val key = createKeyButton(displayChar, 1.0f, altSymbolMap[char])
+            setupKeyTouchAndLongPress(key, displayChar, altSymbolMap[char])
+            row1.addView(key)
+            currentKeyButtons.add(key)
+        }
+
+        for (char in alphabetKeysRow2) {
+            val displayChar = if (isShifted || isCapsLock) char.uppercase() else char
+            val key = createKeyButton(displayChar, 1.0f, altSymbolMap[char])
+            setupKeyTouchAndLongPress(key, displayChar, altSymbolMap[char])
+            row2.addView(key)
+            currentKeyButtons.add(key)
+        }
+
+        for (char in alphabetKeysRow3) {
+            val displayChar = if (isShifted || isCapsLock) char.uppercase() else char
+            val key = createKeyButton(displayChar, 1.0f, altSymbolMap[char])
+            setupKeyTouchAndLongPress(key, displayChar, altSymbolMap[char])
+            row3Letters.addView(key)
+            currentKeyButtons.add(key)
+        }
+    }
+
+    private fun populateSymbols() {
+        keySymbols.text = "ABC"
+
+        val page1 = !isSymbolsSecondaryPage
+        val r1 = if (page1) symbolKeysRow1 else symbolPage2Row1
+        val r2 = if (page1) symbolKeysRow2 else symbolPage2Row2
+        val r3 = if (page1) symbolKeysRow3 else symbolPage2Row3
+
+        for (sym in r1) {
+            val key = createKeyButton(sym, 1.0f)
+            key.setOnClickListener {
+                performKeyHaptic()
+                currentInputConnection?.commitText(sym, 1)
+                updateSuggestions()
+            }
+            row1.addView(key)
+            currentKeyButtons.add(key)
+        }
+
+        for (sym in r2) {
+            val key = createKeyButton(sym, 1.0f)
+            key.setOnClickListener {
+                performKeyHaptic()
+                currentInputConnection?.commitText(sym, 1)
+                updateSuggestions()
+            }
+            row2.addView(key)
+            currentKeyButtons.add(key)
+        }
+
+        for (sym in r3) {
+            val key = createKeyButton(sym, 1.0f)
+            key.setOnClickListener {
+                performKeyHaptic()
+                currentInputConnection?.commitText(sym, 1)
+                updateSuggestions()
+            }
+            row3Letters.addView(key)
+            currentKeyButtons.add(key)
+        }
+    }
+
+    private fun createKeyButton(label: String, weight: Float, altSymbol: String? = null): TextView {
+        val tv = TextView(this).apply {
+            val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight).apply {
                 marginStart = 2
                 marginEnd = 2
             }
@@ -441,102 +661,65 @@ class KVIEInputMethodService : InputMethodService() {
             gravity = Gravity.CENTER
             setBackgroundResource(R.drawable.key_bg)
             setTextColor(0xFFFFFFFF.toInt())
-            textSize = 20f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            includeFontPadding = false
-            minWidth = 0
-            minHeight = 0
-            setPadding(0, 0, 0, 0)
+            textSize = 18f
             isClickable = true
             isFocusable = false
-            tag = label
-
-            var isLongPressed = false
-            val longPressHandler = Handler(Looper.getMainLooper())
-            val longPressRunnable = Runnable {
-                val alt = altSymbolMap[label.lowercase()]
-                if (alt != null && !isSymbolsMode) {
-                    isLongPressed = true
-                    performKeyHaptic()
-                    currentInputConnection?.commitText(alt, 1)
-                    updateSuggestions()
-                }
-            }
-
-            setOnTouchListener { v, event ->
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        v.isPressed = true
-                        isLongPressed = false
-                        longPressHandler.postDelayed(longPressRunnable, 350)
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        v.isPressed = false
-                        longPressHandler.removeCallbacks(longPressRunnable)
-                        if (!isLongPressed) {
-                            performKeyHaptic()
-                            val textToCommit = text.toString()
-                            currentInputConnection?.commitText(textToCommit, 1)
-
-                            if (isShifted && !isCapsLock && !isSymbolsMode) {
-                                isShifted = false
-                                updateKeyLabels()
-                            }
-                            updateSuggestions()
-                        }
-                        true
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        v.isPressed = false
-                        longPressHandler.removeCallbacks(longPressRunnable)
-                        true
-                    }
-                    else -> false
-                }
-            }
+            text = label
         }
-        return btn
+        return tv
     }
 
-    private fun updateKeyLabels() {
-        for (btn in currentKeyButtons) {
-            val raw = btn.tag as? String ?: continue
-            if (isSymbolsMode) {
-                btn.text = raw
-            } else {
-                btn.text = if (isShifted || isCapsLock) raw.uppercase() else raw.lowercase()
+    private fun setupKeyTouchAndLongPress(keyView: TextView, primaryChar: String, altChar: String?) {
+        keyView.setOnClickListener {
+            performKeyHaptic()
+            currentInputConnection?.commitText(primaryChar, 1)
+            if (isShifted && !isCapsLock) {
+                isShifted = false
+                updateShiftKeyVisual()
+                populateKeys()
+            }
+            updateSuggestions()
+        }
+
+        if (altChar != null) {
+            keyView.setOnLongClickListener {
+                performKeyHaptic()
+                currentInputConnection?.commitText(altChar, 1)
+                updateSuggestions()
+                true
             }
         }
-
-        keyShift.text = when {
-            isSymbolsMode && isSymbolsSecondaryPage -> "2/2"
-            isSymbolsMode -> "1/2"
-            isCapsLock -> "⇪"
-            isShifted -> "⇧"
-            else -> "⇧"
-        }
-        keyShift.isSelected = isShifted || isCapsLock || (isSymbolsMode && isSymbolsSecondaryPage)
-        keySymbols.text = if (isSymbolsMode) "ABC" else "?123"
-        keyDot.text = if (isSymbolsMode) "/" else "."
-        keyComma.text = if (isSymbolsMode) "=" else ","
     }
 
-    private fun toggleShift() {
+    private fun handleShiftKey() {
         if (isSymbolsMode) {
             isSymbolsSecondaryPage = !isSymbolsSecondaryPage
+            keyShift.text = if (isSymbolsSecondaryPage) "1/2" else "2/2"
             populateKeys()
-            return
-        }
-        if (isCapsLock) {
-            isCapsLock = false
-            isShifted = false
-        } else if (isShifted) {
-            isCapsLock = true
         } else {
-            isShifted = true
+            if (isCapsLock) {
+                isCapsLock = false
+                isShifted = false
+            } else {
+                isShifted = !isShifted
+            }
+            updateShiftKeyVisual()
+            populateKeys()
         }
-        updateKeyLabels()
+    }
+
+    private fun updateShiftKeyVisual() {
+        if (isSymbolsMode) {
+            keyShift.text = if (isSymbolsSecondaryPage) "1/2" else "2/2"
+            keyShift.setTextColor(0xFF00E5FF.toInt())
+        } else {
+            keyShift.text = "⇧"
+            when {
+                isCapsLock -> keyShift.setTextColor(0xFF00E5FF.toInt())
+                isShifted -> keyShift.setTextColor(0xFFD7FB52.toInt())
+                else -> keyShift.setTextColor(0xFFFFFFFF.toInt())
+            }
+        }
     }
 
     private fun toggleSymbolsMode() {
@@ -547,34 +730,75 @@ class KVIEInputMethodService : InputMethodService() {
         populateKeys()
     }
 
-    // ───────────── INTERACTIVE AUTOCORRECT & SUGGESTIONS ─────────────
+    // ───────────── INTERACTIVE AUTOCORRECT & CONTEXTUAL PREDICTION ─────────────
+    private fun checkIsSentenceStart(textBefore: String): Boolean {
+        val trimmed = textBefore.trimEnd()
+        if (trimmed.isEmpty()) return true
+        val lastChar = trimmed.last()
+        return lastChar == '.' || lastChar == '?' || lastChar == '!' || lastChar == '\n'
+    }
+
+    private fun formatSuggestion(word: String, input: String, isSentenceStart: Boolean): String {
+        if (word.equals("Kritix", ignoreCase = true)) return "Kritix"
+        if (word.equals("KVIE", ignoreCase = true)) return "KVIE"
+        if (word.equals("I", ignoreCase = true) || word.equals("I'm", ignoreCase = true) ||
+            word.equals("I've", ignoreCase = true) || word.equals("I'd", ignoreCase = true) ||
+            word.equals("I'll", ignoreCase = true)) {
+            return word.replaceFirstChar { it.uppercase() }
+        }
+        return when {
+            input.length > 1 && input.all { it.isUpperCase() } -> word.uppercase()
+            (input.isNotEmpty() && input[0].isUpperCase()) || isSentenceStart -> word.replaceFirstChar { it.uppercase() }
+            else -> word.lowercase()
+        }
+    }
+
     private fun updateSuggestions() {
         val ic = currentInputConnection ?: return
-        val textBefore = ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
-        val currentWord = textBefore.substringAfterLast(" ", textBefore).trim()
+        val textBefore = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        val isSentenceStart = checkIsSentenceStart(textBefore.dropLastWhile { !it.isWhitespace() })
+
+        val hasTrailingSpace = textBefore.endsWith(" ") || textBefore.isEmpty()
+        val currentWord = if (hasTrailingSpace) "" else textBefore.substringAfterLast(" ", textBefore).trim()
 
         if (currentWord.isEmpty()) {
-            suggestion1.text = "the"
-            suggestion2.text = "Kritix"
-            suggestion3.text = "I"
+            val prevWord = textBefore.trimEnd().substringAfterLast(" ", "").lowercase()
+            val nextWordPredictions = bigramContext[prevWord]
+
+            if (!nextWordPredictions.isNullOrEmpty()) {
+                suggestion1.text = formatSuggestion(nextWordPredictions[0], "", isSentenceStart)
+                suggestion2.text = formatSuggestion(nextWordPredictions.getOrElse(1) { "the" }, "", isSentenceStart)
+                suggestion3.text = formatSuggestion(nextWordPredictions.getOrElse(2) { "I" }, "", isSentenceStart)
+            } else {
+                if (isSentenceStart) {
+                    suggestion1.text = "The"
+                    suggestion2.text = "I"
+                    suggestion3.text = "How"
+                } else {
+                    suggestion1.text = "the"
+                    suggestion2.text = "and"
+                    suggestion3.text = "to"
+                }
+            }
             return
         }
 
-        // 1. Check known phonetic brand typos & instant autocorrect
         val lower = currentWord.lowercase()
-        val brandCorrection = when (lower) {
-            "critics", "critic", "kritiks", "kritik", "kritcs", "kritic", "critis" -> "Kritix"
-            "teh" -> "the"
-            "recieve" -> "receive"
-            "kvie" -> "KVIE"
-            "tauri" -> "Tauri"
-            else -> null
+        val correction = grammarCorrections[lower]
+
+        if (correction != null) {
+            val formatted = formatSuggestion(correction, currentWord, isSentenceStart)
+            suggestion1.text = formatted
+            suggestion2.text = currentWord
+            val matches = commonWords.filter { it.startsWith(lower, ignoreCase = true) && !it.equals(correction, ignoreCase = true) }
+            suggestion3.text = matches.firstOrNull()?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
+            return
         }
 
-        val matches = commonWords.filter { it.startsWith(currentWord, ignoreCase = true) }
-        val c1 = matches.getOrNull(0) ?: currentWord
-        val c2 = brandCorrection ?: matches.getOrNull(1) ?: (currentWord.replaceFirstChar { it.uppercase() })
-        val c3 = matches.getOrNull(2) ?: "..."
+        val matches = commonWords.filter { it.startsWith(lower, ignoreCase = true) }
+        val c1 = matches.getOrNull(0)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: currentWord
+        val c2 = if (matches.size > 1) formatSuggestion(matches[1], currentWord, isSentenceStart) else currentWord
+        val c3 = matches.getOrNull(2)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
 
         suggestion1.text = c1
         suggestion2.text = c2
@@ -586,7 +810,7 @@ class KVIEInputMethodService : InputMethodService() {
         val ic = currentInputConnection ?: return
         performKeyHaptic()
 
-        val textBefore = ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
+        val textBefore = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
         val currentWord = textBefore.substringAfterLast(" ", textBefore).trim()
         if (currentWord.isNotEmpty()) {
             ic.deleteSurroundingText(currentWord.length, 0)
@@ -621,6 +845,7 @@ class KVIEInputMethodService : InputMethodService() {
         if (clipboardDrawer.visibility == View.VISIBLE) {
             clipboardDrawer.visibility = View.GONE
         } else {
+            emojiDrawer.visibility = View.GONE
             refreshClipboardDrawer()
             clipboardDrawer.visibility = View.VISIBLE
         }
@@ -629,13 +854,13 @@ class KVIEInputMethodService : InputMethodService() {
     private fun refreshClipboardDrawer() {
         clipboardItemsContainer.removeAllViews()
         if (recentClips.isEmpty()) {
-            val emptyText = TextView(this).apply {
-                text = "Clipboard empty (copy text to store)"
+            val emptyTv = TextView(this).apply {
+                text = "Clipboard is empty"
                 setTextColor(0xFF8E8E9E.toInt())
-                textSize = 11f
-                setPadding(10, 0, 10, 0)
+                textSize = 12f
+                setPadding(16, 0, 16, 0)
             }
-            clipboardItemsContainer.addView(emptyText)
+            clipboardItemsContainer.addView(emptyTv)
             return
         }
 
@@ -669,23 +894,31 @@ class KVIEInputMethodService : InputMethodService() {
         }
     }
 
-    // ───────────── EMOJI DRAWER ─────────────
+    // ───────────── EMOJI DRAWER & REAL-TIME SEARCH ─────────────
     private fun setupEmojiDrawer() {
-        tabSmiley.setOnClickListener {
+        tabSmiley.setOnClickListener { selectEmojiCategory(smileyEmojis) }
+        tabGestures.setOnClickListener { selectEmojiCategory(gestureEmojis) }
+        tabHearts.setOnClickListener { selectEmojiCategory(heartEmojis) }
+        tabFire.setOnClickListener { selectEmojiCategory(fireEmojis) }
+        tabAnimals.setOnClickListener { selectEmojiCategory(animalEmojis) }
+        tabFood.setOnClickListener { selectEmojiCategory(foodEmojis) }
+        tabTravel.setOnClickListener { selectEmojiCategory(travelEmojis) }
+        tabObjects.setOnClickListener { selectEmojiCategory(objectEmojis) }
+
+        emojiSearchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString().orEmpty()
+                btnClearEmojiSearch.visibility = if (query.isNotEmpty()) View.VISIBLE else View.GONE
+                filterEmojis(query)
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        btnClearEmojiSearch.setOnClickListener {
             performKeyHaptic()
-            populateEmojiGrid(smileyEmojis)
-        }
-        tabGestures.setOnClickListener {
-            performKeyHaptic()
-            populateEmojiGrid(gestureEmojis)
-        }
-        tabHearts.setOnClickListener {
-            performKeyHaptic()
-            populateEmojiGrid(heartEmojis)
-        }
-        tabFire.setOnClickListener {
-            performKeyHaptic()
-            populateEmojiGrid(fireEmojis)
+            emojiSearchInput.setText("")
+            populateEmojiGrid(currentActiveEmojiCategory)
         }
 
         btnReturnToAbc.setOnClickListener {
@@ -700,11 +933,38 @@ class KVIEInputMethodService : InputMethodService() {
         }
     }
 
+    private fun selectEmojiCategory(category: List<String>) {
+        performKeyHaptic()
+        currentActiveEmojiCategory = category
+        emojiSearchInput.setText("")
+        populateEmojiGrid(category)
+    }
+
+    private fun filterEmojis(query: String) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) {
+            populateEmojiGrid(currentActiveEmojiCategory)
+            return
+        }
+
+        val results = mutableSetOf<String>()
+        for ((keyword, list) in emojiKeywords) {
+            if (keyword.contains(q) || q.contains(keyword)) {
+                results.addAll(list)
+            }
+        }
+        if (results.isEmpty()) {
+            results.addAll(smileyEmojis.take(28))
+        }
+        populateEmojiGrid(results.toList())
+    }
+
     private fun showEmojiDrawer() {
         qwertyContainer.visibility = View.GONE
         clipboardDrawer.visibility = View.GONE
+        aiActionsBar.visibility = View.GONE
         emojiDrawer.visibility = View.VISIBLE
-        populateEmojiGrid(smileyEmojis)
+        selectEmojiCategory(smileyEmojis)
     }
 
     private fun populateEmojiGrid(emojis: List<String>) {
@@ -816,9 +1076,6 @@ class KVIEInputMethodService : InputMethodService() {
         val textBefore = ic.getTextBeforeCursor(200, 0)?.toString() ?: ""
         if (textBefore.isBlank()) return
 
-        polishButton.text = "⏳..."
-        polishButton.isEnabled = false
-
         scope.launch {
             try {
                 val polished = AutoEditClient.refine(textBefore, this@KVIEInputMethodService)
@@ -831,149 +1088,76 @@ class KVIEInputMethodService : InputMethodService() {
                     SessionManager.recordSession(this@KVIEInputMethodService, polished, "$targetApp ($label)")
                     updateSuggestions()
                 }
-            } catch (_: Exception) {
-            } finally {
-                polishButton.text = "✨ Polish"
-                polishButton.isEnabled = true
-            }
+            } catch (_: Exception) {}
         }
     }
 
     // ───────────── SPEECH DICTATION ENGINE ─────────────
-    private fun getActiveEngineId(): String {
-        val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
-        return prefs.getString("active_engine", "android-speech-recognizer") ?: "android-speech-recognizer"
-    }
-
     private fun startListening() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            statusText.text = "Mic permission needed"
-            statusText.visibility = View.VISIBLE
-            suggestionBar.visibility = View.GONE
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            val intent = Intent(this, SetupActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
             return
         }
 
-        val activeEngine = getActiveEngineId()
-        if (activeEngine.startsWith("whisper-cpp")) {
-            startWhisperListening(activeEngine)
-        } else {
-            startSystemSpeechRecognizer()
-        }
-    }
+        destroySpeechRecognizer()
 
-    private fun startWhisperListening(modelId: String) {
-        whisperEngine?.loadModel(modelId)
         isListening = true
         micButton.isSelected = true
-        statusText.text = "Whisper listening... Speak now"
-        statusText.visibility = View.VISIBLE
         suggestionBar.visibility = View.GONE
-
-        engineJob = scope.launch {
-            val transcript = whisperEngine?.transcribeAudio { interim ->
-                if (interim.isNotBlank()) statusText.text = interim
-            } ?: ""
-
-            if (transcript.isNotBlank()) {
-                handleFinalTranscript(transcript)
-            } else {
-                statusText.text = "KVIE AI Voice (Tap mic)"
-            }
-            isListening = false
-            micButton.isSelected = false
-            statusText.visibility = View.GONE
-            suggestionBar.visibility = View.VISIBLE
-        }
-    }
-
-    private fun initSpeechRecognizer() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
-        try {
-            speechRecognizer?.destroy()
-        } catch (_: Exception) {}
+        aiActionsBar.visibility = View.GONE
+        statusText.visibility = View.VISIBLE
+        statusText.text = "🎙️ Listening..."
 
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
-                    statusText.text = "Listening... Speak now"
+                    statusText.text = "🎙️ Listening..."
                 }
 
                 override fun onBeginningOfSpeech() {
-                    statusText.text = "Hearing your voice..."
+                    statusText.text = "🎙️ Dictating..."
                 }
 
-                override fun onRmsChanged(rmsdB: Float) {
-                    if (rmsdB > 2.0f && statusText.text.contains("Listening")) {
-                        statusText.text = "Listening 🎙️..."
-                    }
-                }
-
+                override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
 
                 override fun onEndOfSpeech() {
-                    statusText.text = "Transcribing & cleaning..."
-                }
-
-                override fun onResults(results: android.os.Bundle?) {
-                    stopListening()
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val transcript = matches?.firstOrNull().orEmpty()
-                    handleFinalTranscript(transcript)
+                    statusText.text = "✨ Processing..."
                 }
 
                 override fun onError(error: Int) {
                     stopListening()
-                    statusText.text = "Ready (Tap mic to speak)"
+                }
+
+                override fun onResults(results: android.os.Bundle?) {
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!matches.isNullOrEmpty()) {
+                        handleFinalTranscript(matches[0])
+                    }
+                    stopListening()
                 }
 
                 override fun onPartialResults(partialResults: android.os.Bundle?) {
                     val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val interim = matches?.firstOrNull().orEmpty()
-                    if (interim.isNotBlank()) {
-                        statusText.text = interim
+                    if (!matches.isNullOrEmpty()) {
+                        statusText.text = matches[0]
                     }
                 }
 
                 override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
             })
         }
-    }
-
-    private fun startSystemSpeechRecognizer() {
-        destroySpeechRecognizer()
-        initSpeechRecognizer()
-
-        if (speechRecognizer == null) {
-            statusText.text = "Speech recognizer unavailable"
-            isListening = false
-            micButton.isSelected = false
-            return
-        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US")
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-            putExtra("android.speech.extra.DICTATION_MODE", true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-
-        try {
-            speechRecognizer?.startListening(intent)
-            isListening = true
-            micButton.isSelected = true
-            statusText.text = "Listening... Speak now"
-            statusText.visibility = View.VISIBLE
-            suggestionBar.visibility = View.GONE
-        } catch (e: Exception) {
-            statusText.text = "Speech error: ${e.message}"
-            stopListening()
-        }
+        speechRecognizer?.startListening(intent)
     }
 
     private fun destroySpeechRecognizer() {
@@ -986,10 +1170,8 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun stopListening() {
-        engineJob?.cancel()
-        whisperEngine?.stopRecording()
-        destroySpeechRecognizer()
         isListening = false
+        destroySpeechRecognizer()
         micButton.isSelected = false
         statusText.visibility = View.GONE
         suggestionBar.visibility = View.VISIBLE
@@ -997,10 +1179,7 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun handleFinalTranscript(rawTranscript: String) {
-        if (rawTranscript.isBlank()) {
-            return
-        }
-
+        if (rawTranscript.isBlank()) return
         val ic = currentInputConnection ?: return
 
         // 1. Real-Time Voice Editing Command Interception
@@ -1086,17 +1265,43 @@ class KVIEInputMethodService : InputMethodService() {
         if (!pkg.isNullOrBlank()) {
             lastActivePackageName = pkg
             KVIEAccessibilityService.currentActivePackage = pkg
+            adaptAppTone(pkg)
         }
         isShifted = false
         isCapsLock = false
         isSymbolsMode = false
         emojiDrawer.visibility = View.GONE
         clipboardDrawer.visibility = View.GONE
+        aiActionsBar.visibility = View.GONE
         qwertyContainer.visibility = View.VISIBLE
         statusText.visibility = View.GONE
         suggestionBar.visibility = View.VISIBLE
         populateKeys()
         updateSuggestions()
+    }
+
+    private fun adaptAppTone(packageName: String) {
+        when {
+            packageName.contains("whatsapp", ignoreCase = true) ||
+            packageName.contains("instagram", ignoreCase = true) ||
+            packageName.contains("telegram", ignoreCase = true) ||
+            packageName.contains("snapchat", ignoreCase = true) -> {
+                chipToneCasual.setTextColor(0xFFD7FB52.toInt())
+                chipToneFormal.setTextColor(0xFF8E8E9E.toInt())
+            }
+            packageName.contains("gmail", ignoreCase = true) ||
+            packageName.contains("outlook", ignoreCase = true) ||
+            packageName.contains("linkedin", ignoreCase = true) ||
+            packageName.contains("slack", ignoreCase = true) ||
+            packageName.contains("teams", ignoreCase = true) -> {
+                chipToneFormal.setTextColor(0xFF00E5FF.toInt())
+                chipToneCasual.setTextColor(0xFF8E8E9E.toInt())
+            }
+            else -> {
+                chipToneFormal.setTextColor(0xFF00E5FF.toInt())
+                chipToneCasual.setTextColor(0xFFD7FB52.toInt())
+            }
+        }
     }
 
     fun directCommitText(text: String): Boolean {
