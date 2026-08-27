@@ -6,9 +6,13 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
-    <!-- Android 11+ Package Visibility Queries for Speech Recognition -->
+    <!-- Android 11+ Package Visibility Queries for App Resolution & Speech Recognition -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>

@@ -21,7 +21,22 @@ class KVIEAccessibilityService : AccessibilityService() {
         instance = this
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
+        val eventType = event.eventType
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val pkg = event.packageName?.toString()
+            if (!pkg.isNullOrBlank() && 
+                pkg != packageName && 
+                !pkg.contains("inputmethod", ignoreCase = true) &&
+                !pkg.contains("systemui", ignoreCase = true)) {
+                currentActivePackage = pkg
+                lastTargetPackage = pkg
+            }
+        }
+    }
 
     override fun onInterrupt() {
         instance = null
@@ -121,6 +136,7 @@ class KVIEAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: KVIEAccessibilityService? = null
+        var currentActivePackage: String? = null
 
         val isAvailable: Boolean
             get() = instance != null
@@ -130,8 +146,10 @@ class KVIEAccessibilityService : AccessibilityService() {
         }
 
         fun getActiveAppName(context: Context): String {
-            val pkg = instance?.lastTargetPackage 
+            val pkg = currentActivePackage 
+                ?: instance?.lastTargetPackage 
                 ?: instance?.rootInActiveWindow?.packageName?.toString()
+                ?: KVIEInputMethodService.lastActivePackageName
             return SessionManager.resolveAppName(context, pkg)
         }
     }

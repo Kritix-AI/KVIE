@@ -48,7 +48,7 @@ import { useLocalStreamingVoice } from './hooks/useLocalStreamingVoice'
 import { runGrammarRouter } from './lib/grammarRouter'
 import { useAppTheme } from './hooks/useAppTheme'
 import { tauriBridge } from './lib/tauriBridge'
-import { saveVoiceSession, clearVoiceSessions, VoiceSession } from './lib/sessionRecorder'
+import { saveVoiceSession, clearVoiceSessions, getRecordedVoiceSessions, VoiceSession } from './lib/sessionRecorder'
 import { VoiceSnippet, getVoiceSnippets, saveVoiceSnippets, expandVoiceSnippets } from './lib/snippetsEngine'
 import { CustomWord, getCustomDictionary, saveCustomDictionary, applyCustomDictionary } from './lib/customDictionary'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
@@ -327,15 +327,8 @@ export function App() {
 
   const loadSessions = () => {
     try {
-      const saved = localStorage.getItem('kvie_voice_sessions')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed)) {
-          setSessions(parsed)
-          return
-        }
-      }
-      setSessions([])
+      const allSessions = getRecordedVoiceSessions()
+      setSessions(allSessions)
     } catch {
       setSessions([])
     }
@@ -343,9 +336,20 @@ export function App() {
 
   useEffect(() => {
     loadSessions()
-    const handleStorage = () => loadSessions()
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
+    const handleRefresh = () => loadSessions()
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadSessions()
+      }
+    }
+    window.addEventListener('storage', handleRefresh)
+    window.addEventListener('focus', handleRefresh)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.removeEventListener('storage', handleRefresh)
+      window.removeEventListener('focus', handleRefresh)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
 
   useEffect(() => {

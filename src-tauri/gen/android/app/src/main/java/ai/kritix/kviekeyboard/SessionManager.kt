@@ -64,7 +64,11 @@ object SessionManager {
                 packageName.contains("chrome", ignoreCase = true) -> "Google Chrome"
                 packageName.contains("telegram", ignoreCase = true) -> "Telegram"
                 packageName.contains("instagram", ignoreCase = true) -> "Instagram"
+                packageName.contains("linkedin", ignoreCase = true) -> "LinkedIn"
+                packageName.contains("outlook", ignoreCase = true) -> "Microsoft Outlook"
+                packageName.contains("teams", ignoreCase = true) -> "Microsoft Teams"
                 packageName.contains("notes", ignoreCase = true) || packageName.contains("memo", ignoreCase = true) -> "Notes"
+                packageName.contains("keep", ignoreCase = true) -> "Google Keep"
                 packageName.contains("mms", ignoreCase = true) || packageName.contains("messaging", ignoreCase = true) -> "Messages"
                 packageName.contains("gmail", ignoreCase = true) -> "Gmail"
                 packageName.contains("twitter", ignoreCase = true) || packageName.contains("x.android", ignoreCase = true) -> "X (Twitter)"
@@ -72,6 +76,8 @@ object SessionManager {
                 packageName.contains("docs", ignoreCase = true) -> "Google Docs"
                 packageName.contains("slack", ignoreCase = true) -> "Slack"
                 packageName.contains("discord", ignoreCase = true) -> "Discord"
+                packageName.contains("signal", ignoreCase = true) -> "Signal"
+                packageName.contains("reddit", ignoreCase = true) -> "Reddit"
                 else -> packageName.substringAfterLast(".").replaceFirstChar { it.uppercase() }
             }
         }

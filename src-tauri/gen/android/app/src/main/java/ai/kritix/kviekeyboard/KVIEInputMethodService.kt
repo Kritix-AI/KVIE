@@ -825,7 +825,8 @@ class KVIEInputMethodService : InputMethodService() {
                 if (polished != null && polished.isNotBlank() && polished != textBefore) {
                     ic.deleteSurroundingText(textBefore.length, 0)
                     ic.commitText(polished, 1)
-                    val targetApp = SessionManager.resolveAppName(this@KVIEInputMethodService, currentInputEditorInfo?.packageName)
+                    val targetPkg = currentInputEditorInfo?.packageName ?: lastActivePackageName ?: KVIEAccessibilityService.currentActivePackage
+                    val targetApp = SessionManager.resolveAppName(this@KVIEInputMethodService, targetPkg)
                     SessionManager.recordSession(this@KVIEInputMethodService, polished, "$targetApp (AI Polish)")
                 }
             } catch (_: Exception) {
@@ -1002,7 +1003,10 @@ class KVIEInputMethodService : InputMethodService() {
         val cleanText = SmolLMEngine.stripFillersAndPunctuate(rawTranscript)
         if (cleanText.isBlank()) return
 
-        val targetApp = SessionManager.resolveAppName(this, currentInputEditorInfo?.packageName)
+        val targetPkg = currentInputEditorInfo?.packageName 
+            ?: lastActivePackageName 
+            ?: KVIEAccessibilityService.currentActivePackage
+        val targetApp = SessionManager.resolveAppName(this, targetPkg)
         val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
         ic.commitText(prefix + cleanText + " ", 1)
         SessionManager.recordSession(this, cleanText, targetApp)
@@ -1024,6 +1028,11 @@ class KVIEInputMethodService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        val pkg = info?.packageName
+        if (!pkg.isNullOrBlank()) {
+            lastActivePackageName = pkg
+            KVIEAccessibilityService.currentActivePackage = pkg
+        }
         isShifted = false
         isCapsLock = false
         isSymbolsMode = false
@@ -1054,6 +1063,7 @@ class KVIEInputMethodService : InputMethodService() {
 
     companion object {
         var instance: KVIEInputMethodService? = null
+        var lastActivePackageName: String? = null
 
         fun commitFromExternal(text: String): Boolean {
             return instance?.directCommitText(text) ?: false
