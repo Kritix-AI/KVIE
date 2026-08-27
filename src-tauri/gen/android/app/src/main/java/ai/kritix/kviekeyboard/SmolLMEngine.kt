@@ -114,5 +114,35 @@ class SmolLMEngine(private val context: Context) {
 
             return routed.trim()
         }
+
+        fun parseVoiceCommand(raw: String): VoiceCommand? {
+            val trimmed = raw.trim().lowercase().removeSuffix(".").removeSuffix("!")
+            return when {
+                trimmed in listOf("delete that", "scratch that", "undo that", "delete last word", "remove that") ->
+                    VoiceCommand(VoiceCommandType.DELETE_LAST_WORD)
+                trimmed in listOf("delete last sentence", "delete sentence", "remove sentence", "undo sentence") ->
+                    VoiceCommand(VoiceCommandType.DELETE_LAST_SENTENCE)
+                trimmed in listOf("clear all", "delete all", "clear text", "delete everything") ->
+                    VoiceCommand(VoiceCommandType.CLEAR_ALL)
+                trimmed in listOf("new line", "next line", "enter", "next paragraph") ->
+                    VoiceCommand(VoiceCommandType.NEW_LINE)
+                trimmed in listOf("make this formal", "make formal", "rewrite formal", "turn formal") ->
+                    VoiceCommand(VoiceCommandType.MAKE_FORMAL)
+                trimmed in listOf("make this casual", "make casual", "rewrite casual", "turn casual") ->
+                    VoiceCommand(VoiceCommandType.MAKE_CASUAL)
+                else -> null
+            }
+        }
     }
+
+    enum class VoiceCommandType {
+        DELETE_LAST_WORD,
+        DELETE_LAST_SENTENCE,
+        CLEAR_ALL,
+        NEW_LINE,
+        MAKE_FORMAL,
+        MAKE_CASUAL
+    }
+
+    data class VoiceCommand(val type: VoiceCommandType)
 }

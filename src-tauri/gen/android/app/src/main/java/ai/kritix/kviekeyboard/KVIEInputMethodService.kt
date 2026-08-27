@@ -811,9 +811,9 @@ class KVIEInputMethodService : InputMethodService() {
         startService(serviceIntent)
     }
 
-    private fun triggerAIPolish() {
+    private fun triggerAIPolish(style: String = "clean") {
         val ic = currentInputConnection ?: return
-        val textBefore = ic.getTextBeforeCursor(150, 0)?.toString() ?: ""
+        val textBefore = ic.getTextBeforeCursor(200, 0)?.toString() ?: ""
         if (textBefore.isBlank()) return
 
         polishButton.text = "⏳..."
@@ -827,7 +827,9 @@ class KVIEInputMethodService : InputMethodService() {
                     ic.commitText(polished, 1)
                     val targetPkg = currentInputEditorInfo?.packageName ?: lastActivePackageName ?: KVIEAccessibilityService.currentActivePackage
                     val targetApp = SessionManager.resolveAppName(this@KVIEInputMethodService, targetPkg)
-                    SessionManager.recordSession(this@KVIEInputMethodService, polished, "$targetApp (AI Polish)")
+                    val label = if (style == "clean") "AI Polish" else "$style Polish"
+                    SessionManager.recordSession(this@KVIEInputMethodService, polished, "$targetApp ($label)")
+                    updateSuggestions()
                 }
             } catch (_: Exception) {
             } finally {
@@ -1000,6 +1002,58 @@ class KVIEInputMethodService : InputMethodService() {
         }
 
         val ic = currentInputConnection ?: return
+
+        // 1. Real-Time Voice Editing Command Interception
+        val command = SmolLMEngine.parseVoiceCommand(rawTranscript)
+        if (command != null) {
+            performKeyHaptic()
+            when (command.type) {
+                SmolLMEngine.VoiceCommandType.DELETE_LAST_WORD -> {
+                    val before = ic.getTextBeforeCursor(60, 0)?.toString() ?: ""
+                    val trimmed = before.trimEnd()
+                    val lastWord = trimmed.substringAfterLast(" ", "")
+                    if (lastWord.isNotEmpty()) {
+                        ic.deleteSurroundingText(before.length - trimmed.lastIndexOf(lastWord), 0)
+                    } else if (before.isNotEmpty()) {
+                        ic.deleteSurroundingText(before.length, 0)
+                    }
+                    updateSuggestions()
+                    return
+                }
+                SmolLMEngine.VoiceCommandType.DELETE_LAST_SENTENCE -> {
+                    val before = ic.getTextBeforeCursor(300, 0)?.toString() ?: ""
+                    val idx = maxOf(before.lastIndexOf('.'), before.lastIndexOf('?'), before.lastIndexOf('!'))
+                    if (idx != -1 && idx < before.length - 1) {
+                        ic.deleteSurroundingText(before.length - (idx + 1), 0)
+                    } else {
+                        ic.deleteSurroundingText(before.length, 0)
+                    }
+                    updateSuggestions()
+                    return
+                }
+                SmolLMEngine.VoiceCommandType.CLEAR_ALL -> {
+                    val before = ic.getTextBeforeCursor(2000, 0)?.toString() ?: ""
+                    ic.deleteSurroundingText(before.length, 0)
+                    updateSuggestions()
+                    return
+                }
+                SmolLMEngine.VoiceCommandType.NEW_LINE -> {
+                    ic.commitText("\n", 1)
+                    updateSuggestions()
+                    return
+                }
+                SmolLMEngine.VoiceCommandType.MAKE_FORMAL -> {
+                    triggerAIPolish("formal")
+                    return
+                }
+                SmolLMEngine.VoiceCommandType.MAKE_CASUAL -> {
+                    triggerAIPolish("casual")
+                    return
+                }
+            }
+        }
+
+        // 2. Normal Dictation Commit
         val cleanText = SmolLMEngine.stripFillersAndPunctuate(rawTranscript)
         if (cleanText.isBlank()) return
 
