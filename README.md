@@ -24,22 +24,41 @@
 
 ## 📸 Screenshots & Showcase
 
+### 🖥️ Desktop Application (Tauri v2 + Rust Core)
+
+<p align="center">
+  <b>Voice Workspace (Living Document Editor with Real-Time AI Polish)</b><br/><br/>
+  <img src="docs/screenshots/desktop_workspace.png" alt="Desktop Voice Workspace" width="95%" style="border-radius: 12px; border: 1px solid #282838; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+</p>
+
+<br/>
+
+<p align="center">
+  <b>Preferences, Theme Accent Palettes & Multi-Tier Grammar Router Pipeline</b><br/><br/>
+  <img src="docs/screenshots/desktop_preferences_grammar.png" alt="Desktop Preferences & Grammar Router" width="95%" style="border-radius: 12px; border: 1px solid #282838; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+</p>
+
+<br/>
+
+<p align="center">
+  <b>Compact Floating Mic Pill Widget (Expanded & Collapsed States)</b><br/><br/>
+  <img src="docs/screenshots/floating_widget_expanded.png" alt="Desktop Floating Mic Widget Expanded" width="560" style="margin-bottom: 12px; border-radius: 22px; border: 1.5px solid #D7FB52; box-shadow: 0 4px 20px rgba(215, 251, 82, 0.2);" /><br/>
+  <img src="docs/screenshots/floating_widget_collapsed.png" alt="Desktop Floating Mic Widget Collapsed" width="290" style="border-radius: 22px; border: 1.5px solid #D7FB52;" />
+</p>
+
+---
+
+### 📱 Android Mobile Application & Native Keyboard
+
 <table align="center" width="100%">
   <tr>
     <td align="center" width="50%">
-      <b>📱 Mobile Voice Workspace</b><br/><br/>
-      <img src="docs/screenshots/mobile_workspace.jpg" alt="Mobile Voice Workspace" width="340" style="border-radius: 12px; border: 1px solid #282838;" />
+      <b>Mobile Voice Workspace</b><br/><br/>
+      <img src="docs/screenshots/mobile_workspace.jpg" alt="Mobile Voice Workspace" width="340" style="border-radius: 14px; border: 1px solid #282838; box-shadow: 0 8px 24px rgba(0,0,0,0.4);" />
     </td>
     <td align="center" width="50%">
-      <b>⌨️ Next-Gen Keyboard & Voice Sessions</b><br/><br/>
-      <img src="docs/screenshots/mobile_keyboard_sessions.jpg" alt="Next-Gen Keyboard & Voice Sessions" width="340" style="border-radius: 12px; border: 1px solid #282838;" />
-    </td>
-  </tr>
-  <tr>
-    <td align="center" colspan="2">
-      <b>🖥️ Desktop Floating Mic Pill Widget (Expanded & Compact)</b><br/><br/>
-      <img src="docs/screenshots/floating_widget_expanded.png" alt="Desktop Floating Mic Widget Expanded" width="540" style="margin-bottom: 10px; border-radius: 20px; border: 1px solid #D7FB52;" /><br/>
-      <img src="docs/screenshots/floating_widget_collapsed.png" alt="Desktop Floating Mic Widget Collapsed" width="280" style="border-radius: 20px; border: 1px solid #D7FB52;" />
+      <b>Next-Gen Android Keyboard & Voice Sessions</b><br/><br/>
+      <img src="docs/screenshots/mobile_keyboard_sessions.jpg" alt="Next-Gen Keyboard & Voice Sessions" width="340" style="border-radius: 14px; border: 1px solid #282838; box-shadow: 0 8px 24px rgba(0,0,0,0.4);" />
     </td>
   </tr>
 </table>
@@ -64,6 +83,7 @@ Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio str
 | **System-Wide Global Hotkey (`Ctrl+Alt+R` / `⌘+⌥+R`)** | ✅ | ❌ | ✅ **Windows (`WH_KEYBOARD_LL`) & macOS (`CGEventTap`)** |
 | **Cross-App Auto-Inject Everywhere** | ✅ | ❌ | ✅ **Differential `eraseAndInject` + UI Automation** |
 | **Surrounding Text Context Awareness** | ✅ | ❌ | ✅ **0ms OS Accessibility Reader** |
+| **Multi-Tier Grammar Router Pipeline** | ❌ | ❌ | ✅ **Token (0ms) + Sentence + Paragraph & Final** |
 | **AI LLM Post-Processing (Tone & Polish)** | ✅ | ❌ | ✅ **SmolLM2-360M & Qwen2.5-1.5B (Formal, Casual, Shorten)** |
 | **Per-App Automatic Tone Adaptation** | ❌ | ❌ | ✅ **Auto-detects WhatsApp ➔ Casual vs. Gmail ➔ Formal** |
 | **Spoken Voice Editing Commands** | ❌ | ❌ | ✅ **"Delete that", "Clear all", "New line", "Make formal"** |
@@ -87,9 +107,16 @@ Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio str
    - Reads up to 500 characters of surrounding text before the cursor using native COM `IUIAutomation` (Windows) or `AXUIElement` (macOS).
 3. **🪄 Compact Floating Mic Pill**:
    - Always-on-top draggable pill widget with 1-click expand/collapse, Universal Auto-Inject, Voice Command Mode, and Translate.
-4. **⚡ Voice Snippets & Expansion**:
+4. **🧩 Multi-Tier Grammar Router Pipeline**:
+   - **Tier 1: Token Engine (0ms Pre-LLM)**: Fixes letter and word typos (`teh` ➔ `the`), casing (`i` ➔ `I`), and homophones (`their` / `they're`, `your` / `you're`).
+   - **Tier 2: Sentence Engine**: Corrects subject-verb agreement, articles (`a`/`an`), prepositions (`interested in`), and punctuation.
+   - **Tier 3: Paragraph & Final Engine**: Removes duplicate words, conversational restart fragments, and normalizes flow while preserving exact user meaning.
+   - **Interactive Pipeline Tester**: Test and benchmark sample sentences directly in the preferences panel!
+5. **🎨 Preferences & Custom Accent Color Palettes**:
+   - Curated presets: **Cyan, Green, Pink, Red, Purple, Yellow, Orange**, or any custom hex code.
+6. **⚡ Voice Snippets & Expansion**:
    - Spoken cues expand into rich text templates (e.g., *"my signature"* expands into complete multi-line sign-offs).
-5. **📖 Custom Brand Dictionary**:
+7. **📖 Custom Brand Dictionary**:
    - Custom phonetic rules bias transcription and formatting (*"critics"* ➔ *"Kritix"*, *"tauri"* ➔ *"Tauri"*).
 
 ---
@@ -151,8 +178,8 @@ Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio str
                    │                                                                       │
                    ▼                                                                       ▼
     ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
-    │  Qwen2.5-1.5B / SmolLM2 Edge  │                                       │  SmolLM2-360M On-Device LLM  │
-    │  Grammar, Tone & Auto-Edit    │                                       │  Voice Commands & AI Polish   │
+    │ Multi-Tier Grammar Router     │                                       │  SmolLM2-360M On-Device LLM  │
+    │ Token -> Sentence -> Paragraph│                                       │  Voice Commands & AI Polish   │
     └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
                    │                                                                       │
                    └───────────────────────────────────┬───────────────────────────────────┘
