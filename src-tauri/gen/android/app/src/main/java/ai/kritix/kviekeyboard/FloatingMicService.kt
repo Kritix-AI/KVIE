@@ -150,9 +150,13 @@ class FloatingMicService : Service() {
                     }
 
                     if (isDragging) {
-                        params.x = initialX + dx
-                        params.y = initialY + dy
-                        windowManager?.updateViewLayout(floatingView, params)
+                        val newX = initialX + dx
+                        val newY = initialY + dy
+                        if (newX != params.x || newY != params.y) {
+                            params.x = newX
+                            params.y = newY
+                            windowManager?.updateViewLayout(floatingView, params)
+                        }
                     }
                     true
                 }
