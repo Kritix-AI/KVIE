@@ -338,17 +338,21 @@ export function App() {
     loadSessions()
     const handleRefresh = () => loadSessions()
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (typeof window !== 'undefined' && window.document.visibilityState === 'visible') {
         loadSessions()
       }
     }
     window.addEventListener('storage', handleRefresh)
     window.addEventListener('focus', handleRefresh)
-    document.addEventListener('visibilitychange', handleVisibility)
+    if (typeof window !== 'undefined' && window.document) {
+      window.document.addEventListener('visibilitychange', handleVisibility)
+    }
     return () => {
       window.removeEventListener('storage', handleRefresh)
       window.removeEventListener('focus', handleRefresh)
-      document.removeEventListener('visibilitychange', handleVisibility)
+      if (typeof window !== 'undefined' && window.document) {
+        window.document.removeEventListener('visibilitychange', handleVisibility)
+      }
     }
   }, [])
 
