@@ -135,7 +135,7 @@ class FloatingMicService : Service() {
                     isLongPressed = false
                     v.isPressed = true
 
-                    longPressHandler.postDelayed(longPressRunnable, 500)
+                    longPressHandler.postDelayed(longPressRunnable, 600)
                     true
                 }
 
@@ -176,11 +176,13 @@ class FloatingMicService : Service() {
                         return@setOnTouchListener true
                     }
 
-                    // Single Tap handling (<200ms without dragging)
+                    // Single Tap handling: tap always toggles mic cleanly
                     if (!isDragging && !isLongPressed) {
                         v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         toggleListening()
                     }
+                    isLongPressed = false
+                    isDragging = false
                     true
                 }
 
@@ -235,12 +237,28 @@ class FloatingMicService : Service() {
         }
     }
 
+    private fun destroySpeechRecognizer() {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        speechRecognizer = null
+    }
+
     private fun toggleListening() {
         if (isListening) stopListening() else startListening()
     }
 
     private fun startListening() {
-        if (speechRecognizer == null) initSpeechRecognizer()
+        destroySpeechRecognizer()
+        initSpeechRecognizer()
+
+        if (speechRecognizer == null) {
+            isListening = false
+            updateBubbleActiveState(false)
+            return
+        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -262,10 +280,7 @@ class FloatingMicService : Service() {
     private fun stopListening() {
         isListening = false
         updateBubbleActiveState(false)
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-        } catch (_: Exception) {}
+        destroySpeechRecognizer()
     }
 
     private fun updateBubbleActiveState(active: Boolean) {

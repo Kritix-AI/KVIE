@@ -567,12 +567,13 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun startSystemSpeechRecognizer() {
-        if (speechRecognizer == null) {
-            initSpeechRecognizer()
-        }
+        destroySpeechRecognizer()
+        initSpeechRecognizer()
 
         if (speechRecognizer == null) {
             statusText.text = "Speech recognizer unavailable"
+            isListening = false
+            micButton.isSelected = false
             return
         }
 
@@ -593,20 +594,31 @@ class KVIEInputMethodService : InputMethodService() {
             speechRecognizer?.startListening(intent)
             isListening = true
             micButton.isSelected = true
+            statusText.text = "Listening... Speak now"
         } catch (e: Exception) {
             statusText.text = "Speech error: ${e.message}"
             stopListening()
         }
     }
 
+    private fun destroySpeechRecognizer() {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        speechRecognizer = null
+    }
+
     private fun stopListening() {
         engineJob?.cancel()
         whisperEngine?.stopRecording()
-        try {
-            speechRecognizer?.cancel()
-        } catch (_: Exception) {}
+        destroySpeechRecognizer()
         isListening = false
         micButton.isSelected = false
+        if (statusText.text.contains("Listening") || statusText.text.contains("Hearing")) {
+            statusText.text = "KVIE AI Voice (Tap mic)"
+        }
     }
 
     private fun handleFinalTranscript(rawTranscript: String) {
