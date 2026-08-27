@@ -2,10 +2,12 @@ package ai.kritix.kviekeyboard
 
 import ai.kritix.desktop.R
 import android.Manifest
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -14,12 +16,13 @@ import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
-import android.widget.Button
+import android.widget.GridLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -30,11 +33,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * KVIE Full Hybrid Voice & QWERTY Keyboard Input Method Service.
- * Combines:
- * 1. Complete QWERTY & Number/Symbol touch typing keypad.
- * 2. Instant AI Voice Dictation toolbar with on-device speech engines.
- * 3. 1-Tap on-device SmolLM2-360M AutoEdit AI Polish for typed text.
+ * KVIE Next-Gen AI Voice & QWERTY Keyboard Input Method Service.
+ * Flagship Features:
+ * 1. Full QWERTY with Dedicated Number Row & Long-Press Alt-Symbols (q->1, w->2, a->@, etc.)
+ * 2. Real-Time Autocorrect & Next-Word 3-Candidate Suggestion Bar
+ * 3. Native Multi-Item Clipboard History Drawer
+ * 4. Full Emoji Keyboard Drawer (Smileys, Gestures, Hearts, Vibes)
+ * 5. Instant 1-Tap AI Voice Dictation & SmolLM2-360M Polish
+ * 6. Dual Tactile Haptic & Acoustic Mechanical Key Click Feedback
  */
 class KVIEInputMethodService : InputMethodService() {
 
@@ -47,22 +53,53 @@ class KVIEInputMethodService : InputMethodService() {
     private var isCapsLock = false
     private var isSymbolsMode = false
     private var isSymbolsSecondaryPage = false
+    private var isNumberRowVisible = true
 
+    // Top Voice & Suggestion Toolbar
+    private lateinit var voiceToolbar: LinearLayout
     private lateinit var statusText: TextView
     private lateinit var micButton: ImageButton
     private lateinit var polishButton: TextView
+    private lateinit var suggestionBar: LinearLayout
+    private lateinit var suggestion1: TextView
+    private lateinit var suggestion2: TextView
+    private lateinit var suggestion3: TextView
+    private lateinit var btnClipboard: TextView
+    private lateinit var btnNumberRowToggle: TextView
+
+    // Clipboard Drawer
+    private lateinit var clipboardDrawer: LinearLayout
+    private lateinit var clipboardItemsContainer: LinearLayout
+    private lateinit var btnClearClipboard: TextView
+    private lateinit var clipboardManager: ClipboardManager
+    private val recentClips = mutableListOf<String>()
+
+    // QWERTY Container
+    private lateinit var qwertyContainer: LinearLayout
+    private lateinit var rowNumbers: LinearLayout
+    private lateinit var row1: LinearLayout
+    private lateinit var row2: LinearLayout
+    private lateinit var row3Letters: LinearLayout
     private lateinit var keyShift: TextView
     private lateinit var keySymbols: TextView
+    private lateinit var keyEmoji: TextView
     private lateinit var keyBackspace: TextView
     private lateinit var keySpace: TextView
     private lateinit var keyDot: TextView
     private lateinit var keyComma: TextView
     private lateinit var keyEnter: TextView
 
-    private lateinit var row1: LinearLayout
-    private lateinit var row2: LinearLayout
-    private lateinit var row3Letters: LinearLayout
+    // Emoji Drawer
+    private lateinit var emojiDrawer: LinearLayout
+    private lateinit var emojiGrid: GridLayout
+    private lateinit var tabSmiley: TextView
+    private lateinit var tabGestures: TextView
+    private lateinit var tabHearts: TextView
+    private lateinit var tabFire: TextView
+    private lateinit var btnReturnToAbc: TextView
+    private lateinit var btnEmojiBackspace: TextView
 
+    private val numberKeys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
     private val alphabetKeysRow1 = listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")
     private val alphabetKeysRow2 = listOf("a", "s", "d", "f", "g", "h", "j", "k", "l")
     private val alphabetKeysRow3 = listOf("z", "x", "c", "v", "b", "n", "m")
@@ -74,6 +111,51 @@ class KVIEInputMethodService : InputMethodService() {
     private val symbolPage2Row1 = listOf("~", "\\", "|", "<", ">", "{", "}", "[", "]", "%")
     private val symbolPage2Row2 = listOf("^", "=", "°", "•", "¥", "€", "£", "¢", "₱", "©")
     private val symbolPage2Row3 = listOf("®", "™", "✓", "§", "¶", "¿", "¡")
+
+    private val altSymbolMap = mapOf(
+        "q" to "1", "w" to "2", "e" to "3", "r" to "4", "t" to "5",
+        "y" to "6", "u" to "7", "i" to "8", "o" to "9", "p" to "0",
+        "a" to "@", "s" to "#", "d" to "$", "f" to "%", "g" to "&",
+        "h" to "-", "j" to "+", "k" to "(", "l" to ")",
+        "z" to "*", "x" to "\"", "c" to "'", "v" to ":", "b" to ";",
+        "n" to "!", "m" to "?"
+    )
+
+    private val commonWords = listOf(
+        "the", "be", "to", "of", "and", "a", "in", "that", "have", "I",
+        "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
+        "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
+        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
+        "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
+        "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
+        "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
+        "than", "then", "now", "look", "only", "come", "its", "over", "think", "also",
+        "back", "after", "use", "two", "how", "our", "work", "first", "well", "way",
+        "even", "new", "want", "because", "any", "these", "give", "day", "most", "us",
+        "Kritix", "KVIE", "hello", "thanks", "please", "yes", "sure", "great", "awesome", "today",
+        "tomorrow", "yesterday", "meeting", "call", "send", "message", "okay", "done", "fine", "cool",
+        "bhai", "kya", "ha", "nahi", "accha", "theek", "kaise", "kaha", "chalo", "ab", "kab"
+    )
+
+    // Emoji Catalogs
+    private val smileyEmojis = listOf(
+        "😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😌","😍","🥰","😘","😗","😙","😚",
+        "😋","😛","😝","😜","🤪","🤨","🧐","🤓","😎","🤩","🥳","😏","😒","😞","😔","😟","😕","🙁","😣","😖",
+        "😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨","😰","😥","😓","🤗","🤔",
+        "🤭","🤫","🤥","😶","😐","😑","😬","🙄","😯","😦","😧","😮","😲","🥱","😴","🤤","😪","😵","🤐","🥴"
+    )
+    private val gestureEmojis = listOf(
+        "👍","👎","👌","✌️","🤞","🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","👋","🤚","🖐️","✋","🖖","👏",
+        "🙌","👐","🤲","🤝","🙏","✍️","💅","🤳","💪","🦾","🦿","🦵","🦶","👂","🦻","👃","🧠","🫀","🫁","🦷"
+    )
+    private val heartEmojis = listOf(
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝","💟","💌",
+        "💋","💯","💢","💥","💫","💦","💨","🕳️","💣","💬","👁️‍🗨️","🗨️","🗯️","💭","💤"
+    )
+    private val fireEmojis = listOf(
+        "🔥","✨","⭐","🌟","⚡","🎉","🎊","🚀","🏆","🥇","👑","💎","🎯","🔮","💡","📌","🔑","🔔","📢","🎵",
+        "🎶","🎤","🎧","🎮","🕹️","🎲","🧩","🎨","🎬","📸","💻","📱","⌚","💰","💵","💸","🎁"
+    )
 
     private val currentKeyButtons = mutableListOf<TextView>()
     private val scope = CoroutineScope(Dispatchers.Main)
@@ -89,29 +171,68 @@ class KVIEInputMethodService : InputMethodService() {
         whisperEngine = WhisperEngine(this)
         parakeetEngine = ParakeetEngine(this)
         AutoEditClient.init(this)
+        initClipboardManager()
     }
 
     override fun onCreateInputView(): View {
         val view = layoutInflater.inflate(R.layout.keyboard_view, null)
         keyboardRootView = view
 
+        // Toolbar Views
+        voiceToolbar = view.findViewById(R.id.voiceToolbar)
         statusText = view.findViewById(R.id.statusText)
         micButton = view.findViewById(R.id.micButton)
         polishButton = view.findViewById(R.id.polishButton)
+        suggestionBar = view.findViewById(R.id.suggestionBar)
+        suggestion1 = view.findViewById(R.id.suggestion1)
+        suggestion2 = view.findViewById(R.id.suggestion2)
+        suggestion3 = view.findViewById(R.id.suggestion3)
+        btnClipboard = view.findViewById(R.id.btnClipboard)
+        btnNumberRowToggle = view.findViewById(R.id.btnNumberRowToggle)
 
+        // Clipboard Drawer Views
+        clipboardDrawer = view.findViewById(R.id.clipboardDrawer)
+        clipboardItemsContainer = view.findViewById(R.id.clipboardItemsContainer)
+        btnClearClipboard = view.findViewById(R.id.btnClearClipboard)
+
+        // QWERTY Views
+        qwertyContainer = view.findViewById(R.id.qwertyContainer)
+        rowNumbers = view.findViewById(R.id.rowNumbers)
         row1 = view.findViewById(R.id.row1)
         row2 = view.findViewById(R.id.row2)
         row3Letters = view.findViewById(R.id.row3Letters)
-
         keyShift = view.findViewById(R.id.keyShift)
         keySymbols = view.findViewById(R.id.keySymbols)
+        keyEmoji = view.findViewById(R.id.keyEmoji)
         keyBackspace = view.findViewById(R.id.keyBackspace)
         keySpace = view.findViewById(R.id.keySpace)
         keyDot = view.findViewById(R.id.keyDot)
         keyComma = view.findViewById(R.id.keyComma)
         keyEnter = view.findViewById(R.id.keyEnter)
 
-        // 1. Setup Voice Dictation Mic Button (Tap: Voice Dictation | Hold: Detach to Floating Screen Bubble)
+        // Emoji Drawer Views
+        emojiDrawer = view.findViewById(R.id.emojiDrawer)
+        emojiGrid = view.findViewById(R.id.emojiGrid)
+        tabSmiley = view.findViewById(R.id.tabSmiley)
+        tabGestures = view.findViewById(R.id.tabGestures)
+        tabHearts = view.findViewById(R.id.tabHearts)
+        tabFire = view.findViewById(R.id.tabFire)
+        btnReturnToAbc = view.findViewById(R.id.btnReturnToAbc)
+        btnEmojiBackspace = view.findViewById(R.id.btnEmojiBackspace)
+
+        setupToolbarActions(view)
+        setupKeypadActions()
+        setupClipboardDrawer()
+        setupEmojiDrawer()
+
+        populateNumberRow()
+        populateKeys()
+        updateSuggestions()
+
+        return view
+    }
+
+    private fun setupToolbarActions(view: View) {
         micButton.setOnClickListener {
             performKeyHaptic()
             if (isListening) stopListening() else startListening()
@@ -123,28 +244,58 @@ class KVIEInputMethodService : InputMethodService() {
             true
         }
 
-        // 2. Setup SmolLM2 AI Polish Button
         polishButton.setOnClickListener {
             performKeyHaptic()
             triggerAIPolish()
         }
 
-        // 3. Setup Switch Input Method Button
+        btnClipboard.setOnClickListener {
+            performKeyHaptic()
+            toggleClipboardDrawer()
+        }
+
+        btnNumberRowToggle.setOnClickListener {
+            performKeyHaptic()
+            isNumberRowVisible = !isNumberRowVisible
+            rowNumbers.visibility = if (isNumberRowVisible) View.VISIBLE else View.GONE
+            btnNumberRowToggle.setTextColor(if (isNumberRowVisible) 0xFF00E5FF.toInt() else 0xFF8E8E9E.toInt())
+        }
+
         view.findViewById<ImageButton>(R.id.switchKeyboardButton).setOnClickListener {
             performKeyHaptic()
             (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
                 .showInputMethodPicker()
         }
 
-        // 4. Setup Keypad Action Buttons with instant 0ms touch response
+        suggestion1.setOnClickListener { applySuggestion(suggestion1.text.toString()) }
+        suggestion2.setOnClickListener { applySuggestion(suggestion2.text.toString()) }
+        suggestion3.setOnClickListener { applySuggestion(suggestion3.text.toString()) }
+    }
+
+    private fun setupKeypadActions() {
         keyShift.setOnClickListener {
             performKeyHaptic()
             toggleShift()
         }
 
+        keyShift.setOnLongClickListener {
+            performKeyHaptic()
+            if (!isSymbolsMode) {
+                isCapsLock = !isCapsLock
+                isShifted = isCapsLock
+                updateKeyLabels()
+            }
+            true
+        }
+
         keySymbols.setOnClickListener {
             performKeyHaptic()
             toggleSymbolsMode()
+        }
+
+        keyEmoji.setOnClickListener {
+            performKeyHaptic()
+            showEmojiDrawer()
         }
 
         setupBackspaceKey()
@@ -154,6 +305,7 @@ class KVIEInputMethodService : InputMethodService() {
                 v.isPressed = true
                 performKeyHaptic()
                 currentInputConnection?.commitText(" ", 1)
+                updateSuggestions()
                 true
             } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
                 v.isPressed = false
@@ -166,6 +318,7 @@ class KVIEInputMethodService : InputMethodService() {
                 v.isPressed = true
                 performKeyHaptic()
                 currentInputConnection?.commitText(if (isSymbolsMode) "/" else ".", 1)
+                updateSuggestions()
                 true
             } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
                 v.isPressed = false
@@ -178,6 +331,7 @@ class KVIEInputMethodService : InputMethodService() {
                 v.isPressed = true
                 performKeyHaptic()
                 currentInputConnection?.commitText(if (isSymbolsMode) "=" else ",", 1)
+                updateSuggestions()
                 true
             } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
                 v.isPressed = false
@@ -196,11 +350,42 @@ class KVIEInputMethodService : InputMethodService() {
                 true
             } else false
         }
+    }
 
-        // 5. Render QWERTY key rows
-        populateKeys()
+    private fun populateNumberRow() {
+        rowNumbers.removeAllViews()
+        for (num in numberKeys) {
+            val btn = TextView(this).apply {
+                val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                    marginStart = 2
+                    marginEnd = 2
+                }
+                layoutParams = params
+                gravity = Gravity.CENTER
+                setBackgroundResource(R.drawable.key_bg)
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 17f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                includeFontPadding = false
+                text = num
+                isClickable = true
+                isFocusable = false
 
-        return view
+                setOnTouchListener { v, event ->
+                    if (event.action == MotionEvent.ACTION_DOWN) {
+                        v.isPressed = true
+                        performKeyHaptic()
+                        currentInputConnection?.commitText(num, 1)
+                        updateSuggestions()
+                        true
+                    } else if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                        v.isPressed = false
+                        true
+                    } else false
+                }
+            }
+            rowNumbers.addView(btn)
+        }
     }
 
     private fun populateKeys() {
@@ -253,10 +438,10 @@ class KVIEInputMethodService : InputMethodService() {
                 marginEnd = 2
             }
             layoutParams = params
-            gravity = android.view.Gravity.CENTER
+            gravity = Gravity.CENTER
             setBackgroundResource(R.drawable.key_bg)
             setTextColor(0xFFFFFFFF.toInt())
-            textSize = 21f
+            textSize = 20f
             setTypeface(null, android.graphics.Typeface.BOLD)
             includeFontPadding = false
             minWidth = 0
@@ -266,23 +451,45 @@ class KVIEInputMethodService : InputMethodService() {
             isFocusable = false
             tag = label
 
+            var isLongPressed = false
+            val longPressHandler = Handler(Looper.getMainLooper())
+            val longPressRunnable = Runnable {
+                val alt = altSymbolMap[label.lowercase()]
+                if (alt != null && !isSymbolsMode) {
+                    isLongPressed = true
+                    performKeyHaptic()
+                    currentInputConnection?.commitText(alt, 1)
+                    updateSuggestions()
+                }
+            }
+
             setOnTouchListener { v, event ->
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         v.isPressed = true
-                        performKeyHaptic()
-                        val textToCommit = text.toString()
-                        currentInputConnection?.commitText(textToCommit, 1)
+                        isLongPressed = false
+                        longPressHandler.postDelayed(longPressRunnable, 350)
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        v.isPressed = false
+                        longPressHandler.removeCallbacks(longPressRunnable)
+                        if (!isLongPressed) {
+                            performKeyHaptic()
+                            val textToCommit = text.toString()
+                            currentInputConnection?.commitText(textToCommit, 1)
 
-                        // Single shift resets after typing 1 character
-                        if (isShifted && !isCapsLock && !isSymbolsMode) {
-                            isShifted = false
-                            updateKeyLabels()
+                            if (isShifted && !isCapsLock && !isSymbolsMode) {
+                                isShifted = false
+                                updateKeyLabels()
+                            }
+                            updateSuggestions()
                         }
                         true
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    MotionEvent.ACTION_CANCEL -> {
                         v.isPressed = false
+                        longPressHandler.removeCallbacks(longPressRunnable)
                         true
                     }
                     else -> false
@@ -317,18 +524,17 @@ class KVIEInputMethodService : InputMethodService() {
 
     private fun toggleShift() {
         if (isSymbolsMode) {
-            // Toggle between symbol page 1 (1/2) and symbol page 2 (2/2)
             isSymbolsSecondaryPage = !isSymbolsSecondaryPage
             populateKeys()
             return
         }
-        if (!isShifted && !isCapsLock) {
-            isShifted = true
-        } else if (isShifted && !isCapsLock) {
+        if (isCapsLock) {
+            isCapsLock = false
+            isShifted = false
+        } else if (isShifted) {
             isCapsLock = true
         } else {
-            isShifted = false
-            isCapsLock = false
+            isShifted = true
         }
         updateKeyLabels()
     }
@@ -341,21 +547,220 @@ class KVIEInputMethodService : InputMethodService() {
         populateKeys()
     }
 
+    // ───────────── INTERACTIVE AUTOCORRECT & SUGGESTIONS ─────────────
+    private fun updateSuggestions() {
+        val ic = currentInputConnection ?: return
+        val textBefore = ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
+        val currentWord = textBefore.substringAfterLast(" ", textBefore).trim()
+
+        if (currentWord.isEmpty()) {
+            suggestion1.text = "the"
+            suggestion2.text = "Kritix"
+            suggestion3.text = "I"
+            return
+        }
+
+        // 1. Check known phonetic brand typos & instant autocorrect
+        val lower = currentWord.lowercase()
+        val brandCorrection = when (lower) {
+            "critics", "critic", "kritiks", "kritik", "kritcs", "kritic", "critis" -> "Kritix"
+            "teh" -> "the"
+            "recieve" -> "receive"
+            "kvie" -> "KVIE"
+            "tauri" -> "Tauri"
+            else -> null
+        }
+
+        val matches = commonWords.filter { it.startsWith(currentWord, ignoreCase = true) }
+        val c1 = matches.getOrNull(0) ?: currentWord
+        val c2 = brandCorrection ?: matches.getOrNull(1) ?: (currentWord.replaceFirstChar { it.uppercase() })
+        val c3 = matches.getOrNull(2) ?: "..."
+
+        suggestion1.text = c1
+        suggestion2.text = c2
+        suggestion3.text = c3
+    }
+
+    private fun applySuggestion(candidate: String) {
+        if (candidate.isBlank() || candidate == "...") return
+        val ic = currentInputConnection ?: return
+        performKeyHaptic()
+
+        val textBefore = ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
+        val currentWord = textBefore.substringAfterLast(" ", textBefore).trim()
+        if (currentWord.isNotEmpty()) {
+            ic.deleteSurroundingText(currentWord.length, 0)
+        }
+        ic.commitText(candidate + " ", 1)
+        updateSuggestions()
+    }
+
+    // ───────────── CLIPBOARD DRAWER ─────────────
+    private fun initClipboardManager() {
+        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboardManager.addPrimaryClipChangedListener {
+            val clip = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+            if (!clip.isNullOrBlank() && !recentClips.contains(clip)) {
+                recentClips.add(0, clip)
+                if (recentClips.size > 15) recentClips.removeAt(recentClips.size - 1)
+                refreshClipboardDrawer()
+            }
+        }
+    }
+
+    private fun setupClipboardDrawer() {
+        btnClearClipboard.setOnClickListener {
+            performKeyHaptic()
+            recentClips.clear()
+            refreshClipboardDrawer()
+            clipboardDrawer.visibility = View.GONE
+        }
+    }
+
+    private fun toggleClipboardDrawer() {
+        if (clipboardDrawer.visibility == View.VISIBLE) {
+            clipboardDrawer.visibility = View.GONE
+        } else {
+            refreshClipboardDrawer()
+            clipboardDrawer.visibility = View.VISIBLE
+        }
+    }
+
+    private fun refreshClipboardDrawer() {
+        clipboardItemsContainer.removeAllViews()
+        if (recentClips.isEmpty()) {
+            val emptyText = TextView(this).apply {
+                text = "Clipboard empty (copy text to store)"
+                setTextColor(0xFF8E8E9E.toInt())
+                textSize = 11f
+                setPadding(10, 0, 10, 0)
+            }
+            clipboardItemsContainer.addView(emptyText)
+            return
+        }
+
+        for (clip in recentClips) {
+            val chip = TextView(this).apply {
+                val params = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                ).apply {
+                    marginStart = 4
+                    marginEnd = 4
+                }
+                layoutParams = params
+                gravity = Gravity.CENTER
+                setBackgroundResource(R.drawable.clipboard_chip_bg)
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 12f
+                setPadding(16, 0, 16, 0)
+                isClickable = true
+                isFocusable = false
+                val display = if (clip.length > 25) clip.take(25) + "…" else clip
+                text = display
+
+                setOnClickListener {
+                    performKeyHaptic()
+                    currentInputConnection?.commitText(clip, 1)
+                    clipboardDrawer.visibility = View.GONE
+                }
+            }
+            clipboardItemsContainer.addView(chip)
+        }
+    }
+
+    // ───────────── EMOJI DRAWER ─────────────
+    private fun setupEmojiDrawer() {
+        tabSmiley.setOnClickListener {
+            performKeyHaptic()
+            populateEmojiGrid(smileyEmojis)
+        }
+        tabGestures.setOnClickListener {
+            performKeyHaptic()
+            populateEmojiGrid(gestureEmojis)
+        }
+        tabHearts.setOnClickListener {
+            performKeyHaptic()
+            populateEmojiGrid(heartEmojis)
+        }
+        tabFire.setOnClickListener {
+            performKeyHaptic()
+            populateEmojiGrid(fireEmojis)
+        }
+
+        btnReturnToAbc.setOnClickListener {
+            performKeyHaptic()
+            emojiDrawer.visibility = View.GONE
+            qwertyContainer.visibility = View.VISIBLE
+        }
+
+        btnEmojiBackspace.setOnClickListener {
+            performKeyHaptic()
+            currentInputConnection?.deleteSurroundingText(1, 0)
+        }
+    }
+
+    private fun showEmojiDrawer() {
+        qwertyContainer.visibility = View.GONE
+        clipboardDrawer.visibility = View.GONE
+        emojiDrawer.visibility = View.VISIBLE
+        populateEmojiGrid(smileyEmojis)
+    }
+
+    private fun populateEmojiGrid(emojis: List<String>) {
+        emojiGrid.removeAllViews()
+        val displayWidth = resources.displayMetrics.widthPixels
+        val cellWidth = (displayWidth - 24) / 7
+
+        for (emoji in emojis) {
+            val cell = TextView(this).apply {
+                val params = GridLayout.LayoutParams().apply {
+                    width = cellWidth
+                    height = 110
+                }
+                layoutParams = params
+                gravity = Gravity.CENTER
+                text = emoji
+                textSize = 24f
+                isClickable = true
+                isFocusable = false
+
+                setOnClickListener {
+                    performKeyHaptic()
+                    currentInputConnection?.commitText(emoji, 1)
+                }
+            }
+            emojiGrid.addView(cell)
+        }
+    }
+
     private fun setupBackspaceKey() {
+        val backspaceRunnable = object : Runnable {
+            override fun run() {
+                if (isBackspaceHolding) {
+                    performKeyHaptic()
+                    currentInputConnection?.deleteSurroundingText(1, 0)
+                    updateSuggestions()
+                    backspaceHandler.postDelayed(this, 50)
+                }
+            }
+        }
+
         keyBackspace.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
-                    performKeyHaptic()
-                    deleteLastCharacter()
                     isBackspaceHolding = true
-                    startContinuousBackspace()
+                    performKeyHaptic()
+                    currentInputConnection?.deleteSurroundingText(1, 0)
+                    updateSuggestions()
+                    backspaceHandler.postDelayed(backspaceRunnable, 400)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.isPressed = false
                     isBackspaceHolding = false
-                    backspaceHandler.removeCallbacksAndMessages(null)
+                    backspaceHandler.removeCallbacks(backspaceRunnable)
                     true
                 }
                 else -> false
@@ -363,80 +768,36 @@ class KVIEInputMethodService : InputMethodService() {
         }
     }
 
-    private fun startContinuousBackspace() {
-        backspaceHandler.postDelayed(object : Runnable {
-            override fun run() {
-                if (isBackspaceHolding) {
-                    performKeyHaptic()
-                    deleteLastCharacter()
-                    backspaceHandler.postDelayed(this, 40)
-                }
-            }
-        }, 220)
-    }
-
-    private fun deleteLastCharacter() {
-        val ic = currentInputConnection ?: return
-        val selected = ic.getSelectedText(0)
-        if (selected != null && selected.isNotEmpty()) {
-            ic.commitText("", 1)
-        } else {
-            ic.deleteSurroundingText(1, 0)
-        }
-    }
-
     private fun handleEnterKey() {
         val ic = currentInputConnection ?: return
-        val info = currentInputEditorInfo
-        if (info != null && (info.imeOptions and EditorInfo.IME_MASK_ACTION) != EditorInfo.IME_ACTION_NONE &&
-            (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0
-        ) {
-            ic.performEditorAction(info.imeOptions and EditorInfo.IME_MASK_ACTION)
-        } else {
-            ic.commitText("\n", 1)
+        val editorInfo = currentInputEditorInfo
+        val imeAction = editorInfo.imeOptions and EditorInfo.IME_MASK_ACTION
+
+        when (imeAction) {
+            EditorInfo.IME_ACTION_SEARCH,
+            EditorInfo.IME_ACTION_GO,
+            EditorInfo.IME_ACTION_SEND,
+            EditorInfo.IME_ACTION_NEXT,
+            EditorInfo.IME_ACTION_DONE -> {
+                ic.performEditorAction(imeAction)
+            }
+            else -> {
+                ic.commitText("\n", 1)
+            }
         }
+        updateSuggestions()
     }
 
     private fun performKeyHaptic() {
         keyboardRootView?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-    }
-
-    /**
-     * 1-Tap Multi-Tier Grammar Router & On-Device SmolLM2 Polish
-     */
-    private fun triggerAIPolish() {
-        val ic = currentInputConnection ?: return
-        val before = ic.getTextBeforeCursor(300, 0)?.toString() ?: ""
-        if (before.isBlank()) {
-            statusText.text = "Type or speak something first"
-            return
-        }
-
-        statusText.text = "✨ Routing & Polishing..."
-        val tokenCorrected = GrammarRouter.route(before, isGrammarRouterEnabled())
-        if (tokenCorrected != before) {
-            ic.deleteSurroundingText(before.length, 0)
-            ic.commitText(tokenCorrected, 1)
-        }
-
-        scope.launch {
-            try {
-                val polished = AutoEditClient.refine(tokenCorrected, this@KVIEInputMethodService)
-                if (polished != null && polished.isNotBlank() && polished != tokenCorrected) {
-                    ic.deleteSurroundingText(tokenCorrected.length, 0)
-                    ic.commitText(polished, 1)
-                    statusText.text = "✨ Grammar Polished!"
-                } else {
-                    statusText.text = "Grammar Clean ✨"
-                }
-            } catch (e: Exception) {
-                statusText.text = "Polish ready"
-            }
-        }
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            am?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, 0.4f)
+        } catch (_: Exception) {}
     }
 
     private fun launchFloatingMicOverlay() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+        if (!Settings.canDrawOverlays(this)) {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
@@ -444,20 +805,38 @@ class KVIEInputMethodService : InputMethodService() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
-            statusText.text = "Grant 'Draw over apps' to float mic"
             return
         }
-
         val serviceIntent = Intent(this, FloatingMicService::class.java)
         startService(serviceIntent)
-        requestHideSelf(0)
     }
 
-    private fun isGrammarRouterEnabled(): Boolean {
-        val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
-        return prefs.getBoolean("grammar_router_enabled", true)
+    private fun triggerAIPolish() {
+        val ic = currentInputConnection ?: return
+        val textBefore = ic.getTextBeforeCursor(150, 0)?.toString() ?: ""
+        if (textBefore.isBlank()) return
+
+        polishButton.text = "⏳..."
+        polishButton.isEnabled = false
+
+        scope.launch {
+            try {
+                val polished = AutoEditClient.refine(textBefore, this@KVIEInputMethodService)
+                if (polished != null && polished.isNotBlank() && polished != textBefore) {
+                    ic.deleteSurroundingText(textBefore.length, 0)
+                    ic.commitText(polished, 1)
+                    val targetApp = SessionManager.resolveAppName(this@KVIEInputMethodService, currentInputEditorInfo?.packageName)
+                    SessionManager.recordSession(this@KVIEInputMethodService, polished, "$targetApp (AI Polish)")
+                }
+            } catch (_: Exception) {
+            } finally {
+                polishButton.text = "✨ Polish"
+                polishButton.isEnabled = true
+            }
+        }
     }
 
+    // ───────────── SPEECH DICTATION ENGINE ─────────────
     private fun getActiveEngineId(): String {
         val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
         return prefs.getString("active_engine", "android-speech-recognizer") ?: "android-speech-recognizer"
@@ -465,12 +844,13 @@ class KVIEInputMethodService : InputMethodService() {
 
     private fun startListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            statusText.text = "Mic permission needed (open KVIE app)"
+            statusText.text = "Mic permission needed"
+            statusText.visibility = View.VISIBLE
+            suggestionBar.visibility = View.GONE
             return
         }
 
         val activeEngine = getActiveEngineId()
-
         if (activeEngine.startsWith("whisper-cpp")) {
             startWhisperListening(activeEngine)
         } else {
@@ -483,6 +863,8 @@ class KVIEInputMethodService : InputMethodService() {
         isListening = true
         micButton.isSelected = true
         statusText.text = "Whisper listening... Speak now"
+        statusText.visibility = View.VISIBLE
+        suggestionBar.visibility = View.GONE
 
         engineJob = scope.launch {
             val transcript = whisperEngine?.transcribeAudio { interim ->
@@ -496,13 +878,13 @@ class KVIEInputMethodService : InputMethodService() {
             }
             isListening = false
             micButton.isSelected = false
+            statusText.visibility = View.GONE
+            suggestionBar.visibility = View.VISIBLE
         }
     }
 
     private fun initSpeechRecognizer() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            return
-        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
         try {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
@@ -530,27 +912,15 @@ class KVIEInputMethodService : InputMethodService() {
                 }
 
                 override fun onResults(results: android.os.Bundle?) {
+                    stopListening()
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val transcript = matches?.firstOrNull().orEmpty()
                     handleFinalTranscript(transcript)
-                    stopListening()
                 }
 
                 override fun onError(error: Int) {
-                    val errorMsg = when (error) {
-                        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-                        SpeechRecognizer.ERROR_CLIENT -> "Client error (tap again)"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission required"
-                        SpeechRecognizer.ERROR_NETWORK -> "Network required for speech"
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                        SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Busy — tap mic again"
-                        SpeechRecognizer.ERROR_SERVER -> "Speech server error"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
-                        else -> "Speech recognition error ($error)"
-                    }
-                    statusText.text = errorMsg
                     stopListening()
+                    statusText.text = "Ready (Tap mic to speak)"
                 }
 
                 override fun onPartialResults(partialResults: android.os.Bundle?) {
@@ -595,6 +965,8 @@ class KVIEInputMethodService : InputMethodService() {
             isListening = true
             micButton.isSelected = true
             statusText.text = "Listening... Speak now"
+            statusText.visibility = View.VISIBLE
+            suggestionBar.visibility = View.GONE
         } catch (e: Exception) {
             statusText.text = "Speech error: ${e.message}"
             stopListening()
@@ -616,33 +988,26 @@ class KVIEInputMethodService : InputMethodService() {
         destroySpeechRecognizer()
         isListening = false
         micButton.isSelected = false
-        if (statusText.text.contains("Listening") || statusText.text.contains("Hearing")) {
-            statusText.text = "KVIE AI Voice (Tap mic)"
-        }
+        statusText.visibility = View.GONE
+        suggestionBar.visibility = View.VISIBLE
+        updateSuggestions()
     }
 
     private fun handleFinalTranscript(rawTranscript: String) {
         if (rawTranscript.isBlank()) {
-            statusText.text = "Didn't catch that — tap mic"
             return
         }
 
         val ic = currentInputConnection ?: return
-
-        // 1. Instant Filler-Word Stripping & Punctuation Cleanup BEFORE text hits the active input field
         val cleanText = SmolLMEngine.stripFillersAndPunctuate(rawTranscript)
-        if (cleanText.isBlank()) {
-            statusText.text = "Ready (Tap mic or type)"
-            return
-        }
+        if (cleanText.isBlank()) return
 
         val targetApp = SessionManager.resolveAppName(this, currentInputEditorInfo?.packageName)
         val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
         ic.commitText(prefix + cleanText + " ", 1)
-        statusText.text = "Ready (Tap mic or type)"
         SessionManager.recordSession(this, cleanText, targetApp)
+        updateSuggestions()
 
-        // 2. Background SmolLM2 AutoEdit refinement pass
         scope.launch {
             try {
                 val refined = AutoEditClient.refine(cleanText, this@KVIEInputMethodService)
@@ -651,6 +1016,7 @@ class KVIEInputMethodService : InputMethodService() {
                     ic.deleteSurroundingText(oldLen, 0)
                     ic.commitText(prefix + refined + " ", 1)
                     SessionManager.recordSession(this@KVIEInputMethodService, refined, "$targetApp (AI Polish)")
+                    updateSuggestions()
                 }
             } catch (_: Exception) {}
         }
@@ -658,29 +1024,28 @@ class KVIEInputMethodService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        val engine = getActiveEngineId()
-        val displayName = when {
-            engine.contains("whisper") -> "Whisper GGUF"
-            engine.contains("parakeet") -> "Parakeet ONNX"
-            else -> "SpeechRecognizer"
-        }
-        statusText.text = "KVIE Hybrid ($displayName)"
         isShifted = false
         isCapsLock = false
         isSymbolsMode = false
+        emojiDrawer.visibility = View.GONE
+        clipboardDrawer.visibility = View.GONE
+        qwertyContainer.visibility = View.VISIBLE
+        statusText.visibility = View.GONE
+        suggestionBar.visibility = View.VISIBLE
         populateKeys()
+        updateSuggestions()
     }
 
     fun directCommitText(text: String): Boolean {
         val ic = currentInputConnection ?: return false
         val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
-        return ic.commitText(prefix + text + " ", 1)
+        val res = ic.commitText(prefix + text + " ", 1)
+        updateSuggestions()
+        return res
     }
 
     override fun onDestroy() {
-        if (instance == this) {
-            instance = null
-        }
+        if (instance == this) instance = null
         stopListening()
         speechRecognizer?.destroy()
         backspaceHandler.removeCallbacksAndMessages(null)

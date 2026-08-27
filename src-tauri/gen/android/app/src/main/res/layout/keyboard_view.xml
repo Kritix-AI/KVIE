@@ -4,79 +4,220 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#0F0F13"
+    android:background="#0E0E13"
     android:paddingStart="4dp"
     android:paddingEnd="4dp"
-    android:paddingTop="6dp"
-    android:paddingBottom="12dp">
+    android:paddingTop="4dp"
+    android:paddingBottom="10dp">
 
-    <!-- ───────────── TOP AI VOICE TOOLBAR ───────────── -->
+    <!-- ───────────── TOP AI VOICE & ACTIONS TOOLBAR ───────────── -->
     <LinearLayout
         android:id="@+id/voiceToolbar"
         android:layout_width="match_parent"
-        android:layout_height="50dp"
+        android:layout_height="48dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#17171F"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:layout_marginBottom="6dp">
+        android:background="#15151E"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:layout_marginBottom="4dp">
 
-        <!-- Voice Mic Button (Larger & Ergonomic) -->
+        <!-- Voice Mic Button (44x44dp) -->
         <ImageButton
             android:id="@+id/micButton"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:background="@drawable/mic_toolbar_btn_bg"
             android:contentDescription="Voice dictation"
             android:src="@android:drawable/ic_btn_speak_now"
             android:scaleType="centerInside"
-            android:padding="7dp" />
+            android:padding="6dp" />
 
-        <!-- Status & Live Audio Waveform Text -->
+        <!-- Speech Status Waveform Text (Visible during Voice capture) -->
         <TextView
             android:id="@+id/statusText"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="10dp"
-            android:layout_marginEnd="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="6dp"
             android:singleLine="true"
             android:ellipsize="marquee"
-            android:text="KVIE AI Voice (Tap mic)"
+            android:text="KVIE AI Voice"
             android:textColor="#D7FB52"
             android:textStyle="bold"
-            android:textSize="12.5sp" />
+            android:textSize="12.5sp"
+            android:visibility="gone" />
+
+        <!-- Interactive Next-Word & Autocorrect Candidate Bar (Visible when typing) -->
+        <LinearLayout
+            android:id="@+id/suggestionBar"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp">
+
+            <TextView
+                android:id="@+id/suggestion1"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:background="@drawable/suggestion_pill_bg"
+                android:text="the"
+                android:textColor="#A0A0B2"
+                android:textSize="12.5sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:clickable="true"
+                android:focusable="false"
+                android:layout_marginEnd="3dp" />
+
+            <TextView
+                android:id="@+id/suggestion2"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1.2"
+                android:gravity="center"
+                android:background="@drawable/suggestion_pill_bg"
+                android:text="Kritix"
+                android:textColor="#00E5FF"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:clickable="true"
+                android:focusable="false"
+                android:layout_marginEnd="3dp" />
+
+            <TextView
+                android:id="@+id/suggestion3"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:background="@drawable/suggestion_pill_bg"
+                android:text="I"
+                android:textColor="#A0A0B2"
+                android:textSize="12.5sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:clickable="true"
+                android:focusable="false" />
+        </LinearLayout>
+
+        <!-- Clipboard History Quick Button -->
+        <TextView
+            android:id="@+id/btnClipboard"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:text="📋"
+            android:textSize="14sp"
+            android:contentDescription="Clipboard History"
+            android:clickable="true"
+            android:focusable="false" />
+
+        <!-- Number Row Toggle Button -->
+        <TextView
+            android:id="@+id/btnNumberRowToggle"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:text="123"
+            android:textColor="#8E8E9E"
+            android:textStyle="bold"
+            android:textSize="11sp"
+            android:contentDescription="Toggle Number Row"
+            android:clickable="true"
+            android:focusable="false" />
 
         <!-- SmolLM2 AI Polish Button -->
         <TextView
             android:id="@+id/polishButton"
             android:layout_width="wrap_content"
-            android:layout_height="30dp"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
+            android:layout_height="28dp"
             android:gravity="center"
             android:background="@drawable/key_special_bg"
             android:text="✨ Polish"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
-            android:textSize="11.5sp"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:layout_marginEnd="4dp"
+            android:textSize="11sp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
             android:clickable="true"
             android:focusable="false" />
 
         <!-- Switch IME Globe Button -->
         <ImageButton
             android:id="@+id/switchKeyboardButton"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="Switch input method"
             android:src="@android:drawable/ic_menu_more"
             android:scaleType="centerInside"
-            android:padding="3dp" />
+            android:padding="2dp" />
+    </LinearLayout>
+
+    <!-- ───────────── CLIPBOARD DRAWER (MULTI-ITEM HISTORY) ───────────── -->
+    <LinearLayout
+        android:id="@+id/clipboardDrawer"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#121218"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/clipboardHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CLIPS:"
+            android:textColor="#00E5FF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="6dp" />
+
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/clipboardItemsContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/btnClearClipboard"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:background="@drawable/key_special_bg"
+            android:text="Clear"
+            android:textColor="#FF5252"
+            android:textSize="10sp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:clickable="true"
+            android:focusable="false" />
     </LinearLayout>
 
     <!-- ───────────── QWERTY KEYBOARD CONTAINER ───────────── -->
@@ -86,40 +227,49 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
+        <!-- DEDICATED NUMBER ROW (1 2 3 4 5 6 7 8 9 0) -->
+        <LinearLayout
+            android:id="@+id/rowNumbers"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="4dp" />
+
         <!-- ROW 1: Q W E R T Y U I O P -->
         <LinearLayout
             android:id="@+id/row1"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="5dp" />
+            android:layout_marginBottom="4dp" />
 
         <!-- ROW 2: A S D F G H J K L -->
         <LinearLayout
             android:id="@+id/row2"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingStart="18dp"
-            android:paddingEnd="18dp"
-            android:layout_marginBottom="5dp" />
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:layout_marginBottom="4dp" />
 
         <!-- ROW 3: [SHIFT] Z X C V B N M [BACKSPACE] -->
         <LinearLayout
             android:id="@+id/row3"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginBottom="5dp">
+            android:layout_marginBottom="4dp">
 
             <TextView
                 android:id="@+id/keyShift"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.45"
+                android:layout_weight="1.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
@@ -143,7 +293,7 @@
                 android:id="@+id/keyBackspace"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.45"
+                android:layout_weight="1.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
@@ -156,11 +306,11 @@
                 android:focusable="false" />
         </LinearLayout>
 
-        <!-- ROW 4: [?123] [,] [ SPACE (KVIE) ] [.] [ENTER ↵] -->
+        <!-- ROW 4: [?123] [😊 Emoji] [,] [ SPACE (KVIE) ] [.] [ENTER ↵] -->
         <LinearLayout
             android:id="@+id/row4"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center">
 
@@ -168,15 +318,30 @@
                 android:id="@+id/keySymbols"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.45"
+                android:layout_weight="1.3"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_special_bg"
                 android:text="\?123"
                 android:textColor="#FFFFFF"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
+
+            <!-- Dedicated Emoji Key -->
+            <TextView
+                android:id="@+id/keyEmoji"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:gravity="center"
+                android:background="@drawable/key_special_bg"
+                android:text="😊"
+                android:textSize="16sp"
                 android:clickable="true"
                 android:focusable="false" />
 
@@ -184,14 +349,14 @@
                 android:id="@+id/keyComma"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1"
+                android:layout_weight="0.9"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text=","
                 android:textColor="#FFFFFF"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -200,14 +365,14 @@
                 android:id="@+id/keySpace"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="4.6"
+                android:layout_weight="4.4"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text="KVIE"
-                android:textColor="#A0A0B0"
-                android:textSize="14sp"
+                android:textColor="#8E8E9E"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -216,14 +381,14 @@
                 android:id="@+id/keyDot"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1"
+                android:layout_weight="0.9"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_bg"
                 android:text="."
                 android:textColor="#FFFFFF"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
@@ -232,14 +397,136 @@
                 android:id="@+id/keyEnter"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="1.6"
+                android:layout_weight="1.5"
                 android:layout_marginStart="2dp"
                 android:layout_marginEnd="2dp"
                 android:gravity="center"
                 android:background="@drawable/key_accent_bg"
                 android:text="↵"
                 android:textColor="#0E0E12"
-                android:textSize="22sp"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:clickable="true"
+                android:focusable="false" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ───────────── EMOJI KEYBOARD DRAWER ───────────── -->
+    <LinearLayout
+        android:id="@+id/emojiDrawer"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:orientation="vertical"
+        android:background="#101017"
+        android:visibility="gone">
+
+        <!-- Category Selector Tabs -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#161622"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/tabSmiley"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="😀"
+                android:textSize="16sp"
+                android:clickable="true"
+                android:focusable="false" />
+
+            <TextView
+                android:id="@+id/tabGestures"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="👍"
+                android:textSize="16sp"
+                android:clickable="true"
+                android:focusable="false" />
+
+            <TextView
+                android:id="@+id/tabHearts"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="❤️"
+                android:textSize="16sp"
+                android:clickable="true"
+                android:focusable="false" />
+
+            <TextView
+                android:id="@+id/tabFire"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="🔥"
+                android:textSize="16sp"
+                android:clickable="true"
+                android:focusable="false" />
+        </LinearLayout>
+
+        <!-- Scrollable Grid of Emojis -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <GridLayout
+                android:id="@+id/emojiGrid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:columnCount="7"
+                android:padding="6dp" />
+        </ScrollView>
+
+        <!-- Emoji Bottom Control Bar (Return to ABC & Backspace) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#161622"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/btnReturnToAbc"
+                android:layout_width="70dp"
+                android:layout_height="34dp"
+                android:gravity="center"
+                android:background="@drawable/key_special_bg"
+                android:text="ABC"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="14sp"
+                android:clickable="true"
+                android:focusable="false" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/btnEmojiBackspace"
+                android:layout_width="60dp"
+                android:layout_height="34dp"
+                android:gravity="center"
+                android:background="@drawable/key_special_bg"
+                android:text="⌫"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:clickable="true"
                 android:focusable="false" />
