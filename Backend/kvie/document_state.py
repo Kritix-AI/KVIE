@@ -91,7 +91,10 @@ class DocumentState:
         return self.replace(start, end, replacement.strip(), metadata={**(metadata or {}), "sentence_index": index})
 
     def sentence_spans(self) -> List[Tuple[int, int]]:
-        return [(match.start(), match.end()) for match in re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", self._text, re.DOTALL)]
+        matches = list(re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", self._text, re.DOTALL))
+        if not matches and self._text.strip():
+            return [(0, len(self._text))]
+        return [(match.start(), match.end()) for match in matches]
 
     def sentences(self) -> List[str]:
         return [self._text[start:end].strip() for start, end in self.sentence_spans()]

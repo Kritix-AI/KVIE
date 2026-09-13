@@ -71,7 +71,7 @@ import {
   setSelectedAndroidEngine,
 } from './lib/androidKeyboard'
 
-const navItems = ['Workspace', 'Voice IME', 'Sessions', 'Models', 'Settings']
+const navItems = ['Workspace', 'Sessions', 'Models', 'Settings']
 
 export interface STTModel {
   id: string
@@ -1068,7 +1068,7 @@ export function App() {
           )}
 
           {/* ──────────────── TAB VIEW 2: KVIE ANDROID VOICE KEYBOARD (IME) HUB ──────────────── */}
-          {activeNav === 'Voice IME' && (
+          {activeNav === 'Voice IME' && isAndroidDevice && (
             <div className="mx-auto w-full max-w-4xl py-2 sm:py-6 space-y-6 pb-36 md:pb-6">
               {/* Hero Banner */}
               <div

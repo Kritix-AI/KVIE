@@ -37,8 +37,9 @@ class StreamingSTTConfig:
     sample_rate: int = 16_000
     channels: int = 1
     sample_width_bytes: int = 2
-    window_ms: int = 800
-    overlap_ms: int = 250
+    window_ms: int = 2500       # Whisper needs 2-3s minimum for accurate transcription
+    overlap_ms: int = 800       # Large overlap for continuity between windows
+    min_chunk_ms: int = 1500    # First partial after 1.5 seconds of speech
     language: str = "auto"
 
     @property
@@ -53,6 +54,10 @@ class StreamingSTTConfig:
     def stride_bytes(self) -> int:
         stride_ms = self.window_ms - self.overlap_ms
         return int(self.bytes_per_second * stride_ms / 1000)
+
+    @property
+    def min_chunk_bytes(self) -> int:
+        return int(self.bytes_per_second * self.min_chunk_ms / 1000)
 
 
 class _FlushRequest:
@@ -92,6 +97,12 @@ class StreamingSTT:
         self._rolling_confidence = 0.0
         self._rolling_language = ""
         self._silence_count = 0
+        self._buffer = bytearray()
+        self._buffer_start_ms = 0
+        self._callback = None
+        self._audio_start_ms = None
+        self._last_emit_ms = None
+        self._consecutive_empty = 0
         self._worker: Optional[threading.Thread] = None
         self._running = False
         self._lock = threading.Lock()
@@ -102,6 +113,24 @@ class StreamingSTT:
         from Backend.voice.STT import transcribe_with_confidence
 
         return transcribe_with_confidence(audio, duration, language)
+
+    @staticmethod
+    def _transcribe_fast_with_beam(audio: bytes, duration: float, language: str, min_confidence: float = 0.5):
+        """Two-pass transcriber: fast single-beam first, wide-beam retry only on low confidence."""
+        from Backend.voice.STT import _transcribe_faster_whisper, transcribe_with_confidence
+
+        text, confidence = transcribe_with_confidence(audio, duration, language)
+        if confidence >= min_confidence:
+            return text, confidence
+        # Low confidence → retry with wider beam (5 beams) using the same audio
+        try:
+            arr = StreamingSTT._bytes_to_numpy(audio)
+            text2, _, conf2 = _transcribe_faster_whisper(StreamingSTT._model_ref, arr, language, beam_size=5)
+            if conf2 > confidence:
+                return text2, conf2
+        except Exception:
+            pass
+        return text, confidence
 
     @property
     def is_running(self) -> bool:
@@ -134,8 +163,6 @@ class StreamingSTT:
     def push_pcm(self, pcm: bytes) -> None:
         if not pcm:
             return
-        if not self.is_running:
-            self.start()
         self._queue.put(bytes(pcm))
 
     def flush(self, timeout: float = 10.0) -> None:
@@ -171,25 +198,38 @@ class StreamingSTT:
                 self._queue.task_done()
 
     def _drain_windows(self, final: bool) -> None:
+        # Phase 1: full window transcribes
         while len(self._buffer) >= self.config.window_bytes:
             window = bytes(self._buffer[: self.config.window_bytes])
             self._transcribe(window, self._buffer_start_ms, final=False)
             self._discard_stride()
 
+        # Phase 2: early draft — enough audio accumulated but not a full window yet.
+        # Fire a partial so the client can show the user what we have so far.
+        if not final and len(self._buffer) >= self.config.min_chunk_bytes:
+            window = bytes(self._buffer)
+            duration_ms = int(len(window) / self.config.bytes_per_second * 1000)
+            self._transcribe(window, self._buffer_start_ms, final=False, is_draft=True)
+
+        # Phase 3: flush remaining
         if final and self._buffer:
             window = bytes(self._buffer)
             duration_ms = int(len(window) / self.config.bytes_per_second * 1000)
             if duration_ms >= 200:
                 self._transcribe(window, self._buffer_start_ms, final=True)
             self._buffer.clear()
-            self._buffer_start_ms += duration_ms
+            self._buffer_start_ms = 0
+            self._rolling_text = ""
+            self._rolling_confidence = 0.0
+            self._silence_count = 0
 
     def _discard_stride(self) -> None:
         stride = min(len(self._buffer), self.config.stride_bytes)
         self._buffer = self._buffer[stride:]
         self._buffer_start_ms += int(stride / self.config.bytes_per_second * 1000)
 
-    def _transcribe(self, audio: bytes, start_ms: int, final: bool) -> None:
+    def _transcribe(self, audio: bytes, start_ms: int, final: bool,
+                    is_draft: bool = False) -> None:
         duration = len(audio) / self.config.bytes_per_second
         try:
             result = self._transcriber(audio, duration, self.config.language)
@@ -199,6 +239,7 @@ class StreamingSTT:
                 self._silence_count = 0
                 if language:
                     self._rolling_language = language
+                # Skip very low-confidence non-final emissions to reduce noise
                 if not final and confidence < 0.15:
                     return
                 if self._rolling_confidence < 0.15 and confidence >= 0.35:
@@ -207,20 +248,23 @@ class StreamingSTT:
                     merged_text = self._merge_rolling_text(self._rolling_text, cleaned)
                 self._rolling_text = merged_text
                 self._rolling_confidence = max(self._rolling_confidence, confidence)
-                self._emit(
-                    "final" if final else "partial",
-                    text=merged_text,
-                    language=self._rolling_language or language,
-                    confidence=confidence,
-                    start_ms=start_ms,
-                    end_ms=start_ms + int(duration * 1000),
-                )
-                if final:
+
+                # Compact partial: no timestamps/confidence metadata, just text
+                if not final:
+                    self._emit("partial", text=merged_text)
+                else:
+                    self._emit(
+                        "final", text=merged_text,
+                        language=self._rolling_language or language,
+                        confidence=confidence,
+                        start_ms=start_ms,
+                        end_ms=start_ms + int(duration * 1000),
+                    )
                     self._rolling_text = ""
                     self._rolling_confidence = 0.0
                     self._silence_count = 0
             else:
-                # Silence window detected
+                # Silence window detected — log for telemetry
                 self._silence_count += 1
                 if self._silence_count >= 2 and self._rolling_text.strip() and not final:
                     # User took a natural pause: finalize the previous sentence
@@ -234,20 +278,46 @@ class StreamingSTT:
                     )
                     self._rolling_text = ""
                     self._rolling_confidence = 0.0
+                    self._rolling_language = ""
                     self._silence_count = 0
         except Exception as exc:  # keep audio capture alive after a model error
             self._emit("error", error=str(exc), start_ms=start_ms)
 
     @staticmethod
     def _normalize_result(result) -> Tuple[str, str, float]:
+        """Normalize transcriber output to (text, language, confidence).
+
+        Accepted return shapes from transcribers:
+          - str                         → (text, "", 0.0)
+          - (str, float)                → (text, "", confidence)
+          - (str, str)                  → (text, language, 0.0)
+          - (str, float, str) or
+            (str, str, float)           → (text, language, confidence)
+        """
         if isinstance(result, str):
             return result, "", 0.0
-        if not isinstance(result, tuple) or len(result) != 2:
-            raise TypeError("transcriber must return text or a 2-item tuple")
-        text, metadata = result
-        if isinstance(metadata, float):
-            return str(text), "", max(0.0, min(1.0, metadata))
-        return str(text), str(metadata), 0.0
+
+        if not isinstance(result, tuple):
+            raise TypeError("transcriber must return text or a tuple")
+
+        if len(result) == 2:
+            text, meta = result
+            if isinstance(meta, float):
+                return str(text), "", max(0.0, min(1.0, meta))
+            return str(text), str(meta), 0.0
+
+        if len(result) == 3:
+            text, second, third = result
+            # (str, str, float)
+            if isinstance(second, str) and isinstance(third, float):
+                return str(text), second, max(0.0, min(1.0, third))
+            # (str, float, str)
+            if isinstance(second, float) and isinstance(third, str):
+                return str(text), third, max(0.0, min(1.0, second))
+            # fallback: treat second as language, third as confidence
+            return str(text), str(second), max(0.0, min(1.0, float(third)))
+
+        raise TypeError(f"transcriber returned unexpected tuple of length {len(result)}")
 
     def _emit(self, kind: str, **kwargs) -> None:
         self._sequence += 1

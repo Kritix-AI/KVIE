@@ -5,7 +5,24 @@
     android:layout_height="wrap_content"
     android:clipChildren="false"
     android:clipToPadding="false"
-    android:padding="8dp">
+    android:padding="8dp"
+    android:orientation="vertical">
+
+    <!-- Partial transcription text label -->
+    <TextView
+        android:id="@+id/statusLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="6dp"
+        android:textSize="11sp"
+        android:textColor="#80FFFFFF"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:visibility="gone"
+        android:background="@android:color/transparent"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp" />
 
     <!-- Active Listening Glow Ring -->
     <View

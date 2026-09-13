@@ -1,21 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
-import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from '@tauri-apps/api/window'
 import {
   Mic,
   Square,
+  X,
+  Settings,
   Zap,
-  ClipboardCheck,
-  Trash2,
-  Maximize2,
-  Minimize2,
-  PanelRightClose,
-  PanelRightOpen,
-  ChevronLeft,
-  ChevronRight,
-  GripVertical,
   Sparkles,
   Languages,
+  ChevronUp,
+  Trash2,
+  Vote,
 } from 'lucide-react'
 import { tauriBridge } from '../lib/tauriBridge'
 import './FloatingMicWidget.css'
@@ -27,20 +21,22 @@ interface FloatingMicWidgetProps {
   isCommandMode?: boolean
   isTranslationEnabled?: boolean
   targetLanguageName?: string
-  isDesktop: boolean
+  isConsensusMode?: boolean
+  consensusCount?: number
   onToggleListening: () => void
   onToggleUniversalMode: () => void
   onToggleCommandMode?: () => void
   onToggleTranslation?: () => void
-  onInjectCurrentText: () => void
   onClearText: () => void
+  onToggleConsensus?: () => void
+  onConsensusComplete?: () => void
+  onClose?: () => void
   interimTranscript?: string
   recentTranscript?: string
   statusMessage?: string | null
-  isStandalone?: boolean
 }
 
-type DockEdge = 'right' | 'left' | 'top' | 'bottom' | null
+type Theme = 'light' | 'dark'
 
 export const FloatingMicWidget: React.FC<FloatingMicWidgetProps> = ({
   isListening,
@@ -49,248 +45,211 @@ export const FloatingMicWidget: React.FC<FloatingMicWidgetProps> = ({
   isCommandMode,
   isTranslationEnabled = false,
   targetLanguageName = 'English',
-  isDesktop,
+  isConsensusMode = false,
+  consensusCount = 0,
   onToggleListening,
   onToggleUniversalMode,
   onToggleCommandMode,
   onToggleTranslation,
-  onInjectCurrentText,
   onClearText,
+  onToggleConsensus,
+  onConsensusComplete,
+  onClose,
   interimTranscript,
   recentTranscript,
   statusMessage,
-  isStandalone = false,
 }) => {
-  const [position, setPosition] = useState({ x: window.innerWidth - 340, y: window.innerHeight - 130 })
-  const [isDragging, setIsDragging] = useState(false)
-  const [isCollapsed, setIsCollapsed] = useState(false)
-  const [dockEdge, setDockEdge] = useState<DockEdge>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [theme, setTheme] = useState<Theme>('dark')
+  const [tooltipId, setTooltipId] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  const dragStartRef = useRef({ x: 0, y: 0 })
-  const initialPosRef = useRef({ x: 0, y: 0 })
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (isDesktop) {
-      void tauriBridge.startWindowDrag()
-      return
-    }
-    setIsDragging(true)
-    dragStartRef.current = { x: e.clientX, y: e.clientY }
-    initialPosRef.current = { ...position }
-  }
-
-  // Dynamic window resizing & edge positioning for desktop mode
+  // Detect system theme
   useEffect(() => {
-    if (!isDesktop) return
-    const syncWindowSizeAndPosition = async () => {
-      try {
-        const appWindow = getCurrentWindow()
-        const monitor = await currentMonitor()
-        if (!monitor) return
-        const scale = monitor.scaleFactor || 1.0
-        const screenWidth = monitor.size.width
-        const screenHeight = monitor.size.height
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    setTheme(mq.matches ? 'light' : 'dark')
+    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'light' : 'dark')
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
-        const displayText = interimTranscript || recentTranscript
-
-        // Tight logical dimensions fitting all buttons cleanly without scrolling
-        let targetWidth = 460
-        let targetHeight = 70
-
-        if (dockEdge && isCollapsed) {
-          targetWidth = 110
-          targetHeight = 44
-        } else if (isCollapsed) {
-          targetWidth = 140
-          targetHeight = 65
-        }
-
-        const physicalWidth = Math.round(targetWidth * scale)
-        const physicalHeight = Math.round(targetHeight * scale)
-
-        // Dynamically resize window to match tight card bounds (no excess empty height/width)
-        await appWindow.setSize(new PhysicalSize(physicalWidth, physicalHeight))
-
-        if (dockEdge === 'right') {
-          const targetX = screenWidth - physicalWidth
-          const targetY = Math.round((screenHeight / 2) - (physicalHeight / 2))
-          await appWindow.setPosition(new PhysicalPosition(targetX, targetY))
-        }
-      } catch {
-        // browser fallback
-      }
-    }
-    void syncWindowSizeAndPosition()
-  }, [dockEdge, isCollapsed, isDesktop, interimTranscript, recentTranscript])
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return
-      const dx = e.clientX - dragStartRef.current.x
-      const dy = e.clientY - dragStartRef.current.y
-      const newX = initialPosRef.current.x + dx
-      const newY = initialPosRef.current.y + dy
-
-      const edgeThreshold = 50
-      if (newX >= window.innerWidth - 300) {
-        setDockEdge('right')
-      } else if (newX <= edgeThreshold) {
-        setDockEdge('left')
-      } else {
-        setDockEdge(null)
-      }
-
-      setPosition({ x: newX, y: newY })
-    }
-
-    const handleMouseUp = () => {
-      setIsDragging(false)
-    }
-
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
-    }
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [isDragging])
-
-  const displayText = interimTranscript || recentTranscript
-
-  // If docked to edge and collapsed into drawer tab
-  if (dockEdge && isCollapsed) {
-    return (
-      <div
-        className={`edge-tab-handle dock-${dockEdge}`}
-        onClick={() => setIsCollapsed(false)}
-        title="Click to pull out Voice Mic Widget from screen edge"
-        data-tauri-drag-region
-      >
-        <span className="edge-arrow-icon">
-          {dockEdge === 'right' ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </span>
-        <Mic className={`h-4 w-4 ${isListening ? 'text-rose-400 animate-pulse' : 'text-accent'}`} />
-        <span className="text-xs text-zinc-300 font-medium">Mic</span>
-      </div>
-    )
-  }
+  const isDark = theme === 'dark'
+  const pillClasses = [
+    'pill-container',
+    isDark ? 'pill-dark' : 'pill-light',
+    isListening ? 'pill-listening' : '',
+    expanded ? 'pill-expanded' : '',
+  ].filter(Boolean).join(' ')
 
   return (
-    <div
-      className="floating-mic-container"
-      style={isStandalone ? {} : { left: `${position.x}px`, top: `${position.y}px` }}
-    >
-
-
-
-
-      <div
-        className={`floating-mic-card ${isUniversalMode ? 'universal-active' : ''} ${
-          isListening ? 'listening' : ''
-        }`}
+    <div ref={containerRef} className={pillClasses}>
+      {/* Close */}
+      <button
+        className="pill-btn pill-btn-close"
+        onClick={onClose}
+        onMouseEnter={() => setTooltipId('close')}
+        onMouseLeave={() => setTooltipId(null)}
       >
-        <div
-          data-tauri-drag-region
-          className="floating-drag-handle"
-          onMouseDown={handleMouseDown}
-          title="Drag floating mic anywhere on laptop screen"
-        >
-          <GripVertical className="h-4 w-4" />
-        </div>
-
-        <button
-          className={`floating-mic-btn ${isListening ? 'active' : ''}`}
-          onClick={onToggleListening}
-          disabled={!isSupported}
-          title={
-            !isSupported
-              ? 'Speech recognition unavailable'
-              : isListening
-              ? 'Stop voice capture'
-              : 'Start continuous voice capture'
-          }
-          aria-label={isListening ? 'Stop recording' : 'Start recording'}
-        >
-          {isListening && <div className="inner-color-beat" />}
-          {isListening ? <Square className="h-4 w-4 fill-current relative z-10 text-white" /> : <Mic className="h-5 w-5 relative z-10" style={{ color: isListening ? '#ffffff' : 'var(--accent-color)' }} />}
-        </button>
-
-        {!isCollapsed && (
-          <>
-            <button
-              className={`floating-action-btn ${isUniversalMode ? 'active-mode' : ''}`}
-              onClick={onToggleUniversalMode}
-              title={
-                isUniversalMode
-                  ? 'Universal Voice Typing ON (Auto-injects speech into WhatsApp, Notepad, Chrome, etc.)'
-                  : 'Universal Voice Typing OFF (Captures to workspace only)'
-              }
-            >
-              <Zap className="h-3.5 w-3.5" />
-              {isUniversalMode ? 'Universal Auto-Inject' : 'Local Draft'}
-            </button>
-
-            {onToggleCommandMode && (
-              <button
-                className={`floating-action-btn ${isCommandMode ? 'active-command-mode' : ''}`}
-                onClick={onToggleCommandMode}
-                title={
-                  isCommandMode
-                    ? 'Voice Command Mode ON (Executes spoken instructions like "Make formal", "Summarize")'
-                    : 'Voice Command Mode OFF (Standard Voice Dictation)'
-                }
-              >
-                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-                {isCommandMode ? 'Command' : 'Dictate'}
-              </button>
-            )}
-
-            {onToggleTranslation && (
-              <button
-                className={`floating-action-btn ${isTranslationEnabled ? 'active-command-mode' : ''}`}
-                onClick={onToggleTranslation}
-                title={
-                  isTranslationEnabled
-                    ? `Live Translation ON -> ${targetLanguageName} (Translates voice in real-time)`
-                    : 'Live Translation OFF (Captures speech in original language)'
-                }
-              >
-                <Languages className="h-3.5 w-3.5 text-cyan-400" />
-                {isTranslationEnabled ? `-> ${targetLanguageName}` : 'Translate'}
-              </button>
-            )}
-
-            <button
-              className="floating-action-btn"
-              onClick={onClearText}
-              title="Clear text buffer"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </>
+        <X size={14} strokeWidth={2.4} />
+        {tooltipId === 'close' && (
+          <span className="pill-tip pill-tip-bottom">Close</span>
         )}
+      </button>
 
-        {isCollapsed ? (
-          <button
-            className="floating-action-btn"
-            onClick={() => setIsCollapsed(false)}
-            title="Expand full control bar"
-          >
-            <Maximize2 className="h-3.5 w-3.5" /> Expand
-          </button>
+      {/* Mic (primary) */}
+      <button
+        className={`pill-btn pill-btn-mic ${isListening ? 'pill-btn-mic-active' : ''}`}
+        onClick={onToggleListening}
+        disabled={!isSupported}
+        onMouseEnter={() => setTooltipId('mic')}
+        onMouseLeave={() => setTooltipId(null)}
+      >
+        {isListening ? (
+          <div className="mic-ring-wrapper">
+            <div className="mic-ring" />
+            <Square size={16} fill="currentColor" strokeWidth={0} />
+          </div>
         ) : (
-          <button
-            className="floating-action-btn"
-            onClick={() => setIsCollapsed(true)}
-            title="Collapse to compact mic view"
-          >
-            <Minimize2 className="h-3.5 w-3.5" /> Collapse
-          </button>
+          <Mic size={18} strokeWidth={1.8} />
         )}
+        {tooltipId === 'mic' && (
+          <span className="pill-tip pill-tip-bottom">
+            {isListening ? 'Stop Recording' : 'Start Recording'}
+          </span>
+        )}
+      </button>
+
+      {/* Divider (appears when expanded) */}
+      <div className={`pill-divider ${expanded ? 'pill-divider-show' : ''}`} />
+
+      {/* Expand toggle */}
+      <button
+        className={`pill-btn pill-btn-expand ${expanded ? 'pill-btn-expand-active' : ''}`}
+        onClick={() => setExpanded(v => !v)}
+        onMouseEnter={() => setTooltipId('expand')}
+        onMouseLeave={() => setTooltipId(null)}
+      >
+        {expanded ? <ChevronUp size={16} strokeWidth={2.2} /> : <Settings size={14} strokeWidth={2.2} />}
+        {tooltipId === 'expand' && (
+          <span className="pill-tip pill-tip-bottom">
+            {expanded ? 'Less Options' : 'More Options'}
+          </span>
+        )}
+      </button>
+
+      {/* Extra mode buttons */}
+      <div className={`pill-extras ${expanded ? 'pill-extras-open' : ''}`}>
+        <ExtraBtn
+          icon={<Zap size={13} strokeWidth={2} />}
+          active={isUniversalMode}
+          activeColor="#22d3ee"
+          onClick={onToggleUniversalMode}
+          tooltip={isUniversalMode ? 'Local Draft' : 'Universal Auto-Inject'}
+          tooltipId={tooltipId}
+          setTooltipId={setTooltipId}
+        />
+        {onToggleCommandMode && (
+          <ExtraBtn
+            icon={<Sparkles size={13} strokeWidth={2} />}
+            active={!!isCommandMode}
+            activeColor="#a855f7"
+            onClick={onToggleCommandMode}
+            tooltip={isCommandMode ? 'Dictate Mode' : 'Command Mode'}
+            tooltipId={tooltipId}
+            setTooltipId={setTooltipId}
+          />
+        )}
+        {onToggleTranslation && (
+          <ExtraBtn
+            icon={<Languages size={13} strokeWidth={2} />}
+            active={isTranslationEnabled}
+            activeColor="#06b6d4"
+            onClick={onToggleTranslation}
+            tooltip={
+              isTranslationEnabled
+                ? `Translation ON -> ${targetLanguageName}`
+                : 'Live Translation'
+            }
+            tooltipId={tooltipId}
+            setTooltipId={setTooltipId}
+          />
+        )}
+        {onToggleConsensus && !isConsensusMode && (
+          <ExtraBtn
+            icon={<Vote size={13} strokeWidth={2} />}
+            active={isConsensusMode}
+            activeColor="#f97316"
+            onClick={onToggleConsensus}
+            tooltip="Consensus Mode"
+            tooltipId={tooltipId}
+            setTooltipId={setTooltipId}
+          />
+        )}
+        {isConsensusMode && onConsensusComplete && (
+          <ExtraBtn
+            icon={<Vote size={13} strokeWidth={2} />}
+            active={true}
+            activeColor="#f97316"
+            onClick={onConsensusComplete}
+            tooltip={`Finish (${consensusCount} captured)`}
+            tooltipId={tooltipId}
+            setTooltipId={setTooltipId}
+          />
+        )}
+        <ExtraBtn
+          icon={<Trash2 size={13} strokeWidth={2} />}
+          active={false}
+          onClick={onClearText}
+          tooltip="Clear Text"
+          tooltipId={tooltipId}
+          setTooltipId={setTooltipId}
+        />
       </div>
     </div>
+  )
+}
+
+interface ExtraBtnProps {
+  icon: React.ReactNode
+  active: boolean
+  activeColor: string
+  onClick: () => void
+  tooltip: string
+  tooltipId: string | null
+  setTooltipId: (id: string | null) => void
+}
+
+const ExtraBtn: React.FC<ExtraBtnProps> = ({
+  icon,
+  active,
+  activeColor,
+  onClick,
+  tooltip,
+  tooltipId,
+  setTooltipId,
+}) => {
+  const tipId = `extra-${tooltip}`
+  return (
+    <button
+      className={`pill-btn pill-btn-extra ${active ? 'pill-btn-extra-active' : ''}`}
+      onClick={onClick}
+      onMouseEnter={() => setTooltipId(tipId)}
+      onMouseLeave={() => setTooltipId(null)}
+      style={
+        active
+          ? ({
+              '--extra-color': activeColor,
+              color: activeColor,
+              borderColor: activeColor + '55',
+            } as React.CSSProperties)
+          : undefined
+      }
+    >
+      {icon}
+      {tooltipId === tipId && (
+        <span className="pill-tip pill-tip-bottom">{tooltip}</span>
+      )}
+    </button>
   )
 }
 

@@ -87,10 +87,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, username }) => {
                 <span>Minimize to tray</span>
               </label>
               <label className="setting-item">
-                <input type="checkbox" defaultChecked />
-                <span>Voice wake word enabled</span>
-              </label>
-              <label className="setting-item">
                 <input type="checkbox" />
                 <span>Auto-start recording</span>
               </label>

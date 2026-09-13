@@ -152,5 +152,62 @@ class KVIEAccessibilityService : AccessibilityService() {
                 ?: KVIEInputMethodService.lastActivePackageName
             return SessionManager.resolveAppName(context, pkg)
         }
+
+        fun hasSendButtonOnScreen(): Boolean {
+            val s = instance ?: return false
+            return try {
+                val root = s.rootInActiveWindow ?: return false
+                findSendNode(root, 0)
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private fun findSendNode(node: AccessibilityNodeInfo?, depth: Int): Boolean {
+            if (node == null || depth > 12) return false
+            try {
+                // Walk up parent chain to check if any ancestor node (3 levels up)
+                // carries a send-related resource ID — this catches buttons wrapped in layouts
+                var ancestor: AccessibilityNodeInfo? = node
+                var parentDepth = 0
+                while (ancestor != null && parentDepth < 3) {
+                    if (isSendButtonMatch(ancestor)) return true
+                    ancestor = ancestor.parent
+                    parentDepth++
+                }
+
+                // Check all children recursively
+                for (i in 0 until node.childCount) {
+                    val child = node.getChild(i) ?: continue
+                    if (findSendNode(child, depth + 1)) return true
+                }
+            } catch (_: Exception) {}
+            return false
+        }
+
+        private fun isSendButtonMatch(node: AccessibilityNodeInfo): Boolean {
+            if (!node.isClickable || !node.isEnabled) return false
+            val resId = node.viewIdResourceName?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+            val txt = node.text?.toString()?.lowercase() ?: ""
+
+            if (resId.endsWith(":id/send") ||
+                resId.endsWith(":id/send_button") ||
+                resId.endsWith(":id/btn_send") ||
+                resId.endsWith(":id/button_send") ||
+                resId.endsWith(":id/send_btn") ||
+                resId.endsWith(":id/sendIcon") ||
+                resId.endsWith(":id/btnSend") ||
+                resId.endsWith(":id/send_icon")) {
+                return true
+            }
+            if (desc == "send" || desc == "send message" || desc.startsWith("send ")) {
+                return true
+            }
+            if (txt == "send" || txt == "post") {
+                return true
+            }
+            return false
+        }
     }
 }

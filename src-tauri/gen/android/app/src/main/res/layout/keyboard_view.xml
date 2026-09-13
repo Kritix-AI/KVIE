@@ -80,12 +80,11 @@
                 android:id="@+id/suggestion2"
                 android:layout_width="0dp"
                 android:layout_height="32dp"
-                android:layout_weight="1.2"
+                android:layout_weight="1"
                 android:gravity="center"
                 android:background="@drawable/suggestion_pill_bg"
                 android:text="Kritix"
-                android:textColor="#00E5FF"
-                android:textStyle="bold"
+                android:textColor="#A0A0B2"
                 android:textSize="13sp"
                 android:singleLine="true"
                 android:ellipsize="end"
@@ -211,6 +210,35 @@
             android:contentDescription="Clipboard History"
             android:scaleType="centerInside"
             android:padding="6dp"
+            android:clickable="true"
+            android:focusable="false" />
+
+        <!-- Language Toggle (English / Hindi) -->
+        <TextView
+            android:id="@+id/btnLangToggle"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:gravity="center"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:text="A"
+            android:textColor="#D7FB52"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:contentDescription="Toggle Hindi"
+            android:clickable="true"
+            android:focusable="false" />
+
+        <!-- Snippet Shortcuts Toggle -->
+        <TextView
+            android:id="@+id/btnSnippets"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:gravity="center"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:text="≡"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:contentDescription="Text snippets"
             android:clickable="true"
             android:focusable="false" />
 
@@ -696,5 +724,13 @@
                 android:focusable="false" />
         </LinearLayout>
     </LinearLayout>
+
+    <!-- ───────────── HINDI / SNIPPETS OVERLAY ───────────── -->
+    <FrameLayout
+        android:id="@+id/modeOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0E0E13"
+        android:visibility="gone" />
 
 </LinearLayout>

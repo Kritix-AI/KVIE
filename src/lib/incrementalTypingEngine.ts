@@ -145,6 +145,7 @@ export interface TypingDelta {
 export class IncrementalTypingSession {
   private committedText = ''
   private uncommittedInterim = ''
+  private lastProcessedLen = 0  // Track length of last processed text for safety
 
   public getCommittedText(): string {
     return this.committedText
@@ -161,6 +162,7 @@ export class IncrementalTypingSession {
   public reset(): void {
     this.committedText = ''
     this.uncommittedInterim = ''
+    this.lastProcessedLen = 0
   }
 
   public commitCurrent(): void {
@@ -168,11 +170,16 @@ export class IncrementalTypingSession {
       this.committedText = `${this.committedText}${this.uncommittedInterim}`
       this.uncommittedInterim = ''
     }
+    this.lastProcessedLen = this.committedText.length
   }
 
   /**
    * Process an incoming speech segment (interim or final) and compute the exact
    * keyboard delta (how many backspaces to press, and what text to type).
+   *
+   * IMPORTANT: rawIncoming must be the SAME text that was sent to the backend
+   * for typing. If processing (dictionary/snippets) changes between interim and
+   * final, the delta will be wrong. Use the same pipeline for both.
    */
   public processSegment(rawIncoming: string, isFinal: boolean): TypingDelta {
     const raw = rawIncoming.trim()
@@ -199,6 +206,35 @@ export class IncrementalTypingSession {
 
     const previousInterim = this.uncommittedInterim
     const targetInterim = cleanText
+
+    // ── GUARD: Never erase committed text ────────────────────────────
+    // If the incoming text is shorter than what's already committed + interim,
+    // it means the STT revised its output. We should NOT backspace into
+    // committed territory. Only update what's different in the interim.
+    const currentTypedLength = this.committedText.length + previousInterim.length
+    if (targetInterim.length < this.committedText.length && isFinal) {
+      // Final text is shorter than committed — STT revision.
+      // Only type the new committed portion, keep old committed intact.
+      const newCommittedPortion = targetInterim.slice(this.committedText.length)
+      if (newCommittedPortion.length > 0) {
+        this.committedText = targetInterim
+        this.uncommittedInterim = ''
+        return {
+          eraseCount: 0,
+          appendText: newCommittedPortion,
+          committedText: this.committedText,
+          uncommittedInterim: '',
+        }
+      }
+      // Nothing new to type
+      this.uncommittedInterim = ''
+      return {
+        eraseCount: 0,
+        appendText: '',
+        committedText: this.committedText,
+        uncommittedInterim: '',
+      }
+    }
 
     if (previousInterim === targetInterim && !isFinal) {
       return {
@@ -231,6 +267,8 @@ export class IncrementalTypingSession {
     } else {
       this.uncommittedInterim = targetInterim
     }
+
+    this.lastProcessedLen = (this.committedText + this.uncommittedInterim).length
 
     return {
       eraseCount,

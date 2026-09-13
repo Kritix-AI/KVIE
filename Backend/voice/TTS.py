@@ -1,32 +1,30 @@
 """
-Voice/TTS.py — Thin wrapper delegating to Backend.TextToSpeech
+Voice/TTS.py — TTS facade for the voice package.
 
-The authoritative TTS implementation is Backend/TextToSpeech.py, which includes:
-- Full romantic/girlfriend mode
-- 9 emotion types with prosody
-- Hinglish language support
-- Human-like text transformations (conversational starters, fillers, pet names)
-- Long-text intelligent splitting
+Priority chain:
+  1. ChatterboxInference  (CUDA, high-quality multilingual)
+  2. StreamingTTSEngine   (Edge TTS, low-latency cloud fallback)
 
-This wrapper provides a clean async API for the voice/ package.
-New code: from Backend.voice import speak, speak_async
-Legacy code: from Backend.TextToSpeech import TTS, TextToSpeech
+Both engines are optional — if neither is available the speak() calls
+return False and print a notice rather than crashing.
 """
 
-import os
-import sys
+from __future__ import annotations
+
 import asyncio
+import os
 import threading
-from typing import Optional
+import time
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 @dataclass
 class TTSConfig:
-    """Configuration for TTS module"""
+    """Configuration for TTS module."""
     voice: str = "en-IN-NeerjaNeural"
     voice_hindi: str = "hi-IN-SwaraNeural"
     rate: str = "+0%"
@@ -34,17 +32,21 @@ class TTSConfig:
     volume: str = "+0%"
 
     @classmethod
-    def from_env(cls):
-        from dotenv import dotenv_values
-        env = dotenv_values(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
-        return cls(
-            voice=env.get("AssistantVoice") or "en-IN-NeerjaNeural",
-            voice_hindi=env.get("AssistantVoiceHindi") or "hi-IN-SwaraNeural",
-        )
+    def from_env(cls) -> "TTSConfig":
+        try:
+            from dotenv import dotenv_values
+            _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            env = dotenv_values(os.path.join(_root, ".env"))
+            return cls(
+                voice=env.get("AssistantVoice") or "en-IN-NeerjaNeural",
+                voice_hindi=env.get("AssistantVoiceHindi") or "hi-IN-SwaraNeural",
+            )
+        except Exception:
+            return cls()
 
 
 class Emotion(Enum):
-    """Emotion types for voice modulation"""
+    """Emotion types for voice modulation."""
     NEUTRAL = "neutral"
     HAPPY = "happy"
     SAD = "sad"
@@ -57,151 +59,168 @@ class Emotion(Enum):
     URGENT = "urgent"
 
 
-# ── Global State ────────────────────────────────────────────────────────────────
+# ── Global speaking state ───────────────────────────────────────────────────────
 
 @dataclass
-class TTSState:
+class _TTSState:
     is_speaking: bool = False
     mute_until: float = 0.0
 
+
 _state_lock = threading.Lock()
-_state = TTSState()
+_state = _TTSState()
 
 
 def is_speaking() -> bool:
-    """Check if TTS is currently speaking"""
-    import time
+    """Return True if TTS is currently producing audio."""
     with _state_lock:
-        if _state.is_speaking:
-            return True
-        if time.time() < _state.mute_until:
-            return True
-        return False
+        return _state.is_speaking or time.time() < _state.mute_until
 
 
-def _set_speaking(speaking: bool):
+def _set_speaking(speaking: bool) -> None:
     with _state_lock:
         _state.is_speaking = speaking
         if not speaking:
-            import time
             _state.mute_until = time.time() + 0.15
 
 
-# ── Core Speak ─────────────────────────────────────────────────────────────────
+# ── Engine helpers ──────────────────────────────────────────────────────────────
 
-async def _speak_async_impl(text: str, emotion: Optional[Emotion] = None) -> bool:
-    """
-    Internal async implementation — delegates to Backend.TextToSpeech
-    """
-    if not text:
-        return False
-
-    # Map Emotion enum to legacy string
-    emotion_map = {
-        Emotion.NEUTRAL: "neutral",
-        Emotion.HAPPY: "happy",
-        Emotion.SAD: "sad",
-        Emotion.EXCITED: "excited",
-        Emotion.CALM: "calm",
-        Emotion.FRIENDLY: "friendly",
-        Emotion.THINKING: "thinking",
-        Emotion.ROMANTIC: "romantic",
-        Emotion.EMPATHETIC: "empathetic",
-        Emotion.URGENT: "urgent",
-    }
-    emotion_str = emotion_map.get(emotion, "neutral") if emotion else "neutral"
-
+def _try_chatterbox(text: str, emotion: str) -> bool:
+    """Attempt synthesis via ChatterboxInference (CUDA only)."""
     try:
-        # Ensure project root is on sys.path when running as __main__
-        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        if _root not in sys.path:
-            sys.path.insert(0, _root)
-        from Backend.TextToSpeech import TTS as LegacyTTS
-    except ImportError:
-        print("[TTS] Backend.TextToSpeech not available", flush=True)
+        from Backend.voice.chatterbox_inference import get_chatterbox_engine
+        engine = get_chatterbox_engine()
+        if engine is None:
+            return False
+
+        # Map Emotion enum string to language_id
+        lang_id = "hi" if emotion in {"romantic", "loving", "sweet"} else "en"
+        wav_path = engine.synthesize(text, emotion=emotion, language_id=lang_id)
+        if not wav_path:
+            return False
+
+        # Play the generated WAV
+        try:
+            import sounddevice as sd
+            import soundfile as sf
+            data, sr = sf.read(wav_path, dtype="float32")
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            sd.play(data, sr, blocking=True)
+        except Exception:
+            try:
+                import pygame
+                pygame.mixer.init()
+                pygame.mixer.music.load(wav_path)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.05)
+                pygame.mixer.quit()
+            except Exception as e:
+                print(f"[TTS] Playback error: {e}", flush=True)
+                return False
+        finally:
+            try:
+                os.unlink(wav_path)
+            except Exception:
+                pass
+        return True
+
+    except Exception as e:
+        print(f"[TTS] Chatterbox notice: {e}", flush=True)
         return False
 
+
+def _try_edge_tts(text: str, emotion: str) -> bool:
+    """Attempt synthesis via StreamingTTSEngine (Edge TTS)."""
+    try:
+        from Backend.voice.StreamingTTS import get_streaming_engine
+        engine = get_streaming_engine()
+        config = TTSConfig.from_env()
+        return engine.speak(text, voice=config.voice, emotion=emotion)
+    except Exception as e:
+        print(f"[TTS] Edge TTS notice: {e}", flush=True)
+        return False
+
+
+# ── Public API ──────────────────────────────────────────────────────────────────
+
+async def speak_async(text: str, emotion: Emotion = Emotion.NEUTRAL) -> bool:
+    """Async speak — tries Chatterbox then Edge TTS."""
+    if not text or not text.strip():
+        return False
+    emotion_str = emotion.value if isinstance(emotion, Emotion) else str(emotion)
     _set_speaking(True)
     try:
-        result = LegacyTTS(text, emotion=emotion_str)
-        return bool(result)
-    except Exception as e:
-        print(f"[TTS] Error: {e}", flush=True)
-        return False
+        result = await asyncio.to_thread(_try_chatterbox, text, emotion_str)
+        if not result:
+            result = await asyncio.to_thread(_try_edge_tts, text, emotion_str)
+        return result
     finally:
         _set_speaking(False)
 
 
-async def speak_async(text: str, emotion: Emotion = Emotion.NEUTRAL) -> bool:
-    """Async speak — delegates to Backend.TextToSpeech"""
-    return await _speak_async_impl(text, emotion)
-
-
 def speak(text: str, emotion: Emotion = Emotion.NEUTRAL) -> bool:
-    """Synchronous speak — delegates to Backend.TextToSpeech"""
+    """Synchronous speak — tries Chatterbox then Edge TTS."""
+    if not text or not text.strip():
+        return False
+    emotion_str = emotion.value if isinstance(emotion, Emotion) else str(emotion)
+    _set_speaking(True)
     try:
-        loop = asyncio.get_running_loop()
-        # Already inside a running loop — run in thread to avoid conflict
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, speak_async(text, emotion))
-            return future.result()
-    except RuntimeError:
-        # No running loop — safe to use asyncio.run
-        return asyncio.run(speak_async(text, emotion))
+        result = _try_chatterbox(text, emotion_str)
+        if not result:
+            result = _try_edge_tts(text, emotion_str)
+        return result
+    finally:
+        _set_speaking(False)
 
 
 def speak_romantic(text: str) -> bool:
-    """Speak with romantic emotion"""
+    """Speak with romantic emotion."""
     return speak(text, emotion=Emotion.ROMANTIC)
 
 
 async def speak_romantic_async(text: str) -> bool:
-    """Async speak with romantic emotion"""
+    """Async speak with romantic emotion."""
     return await speak_async(text, emotion=Emotion.ROMANTIC)
 
 
 def get_status() -> dict:
-    """Get TTS status"""
+    """Return current TTS status."""
     return {"speaking": _state.is_speaking, "ready": True}
 
 
 def preview_voice(voice: str, text: str = "Hello! This is a test of my voice.") -> bool:
-    """Preview a specific voice"""
-    try:
-        return speak(text)
-    except Exception as e:
-        print(f"[TTS] Preview error: {e}", flush=True)
-        return False
+    """Preview a voice (voice param reserved for future routing)."""
+    return speak(text)
 
 
 def list_available_voices() -> list:
-    """Return the languages supported by the Chatterbox multilingual model."""
+    """Return the languages supported by the active TTS engine."""
     return [
         {"ShortName": "en", "Locale": "en", "DisplayName": "English"},
         {"ShortName": "hi", "Locale": "hi", "DisplayName": "Hindi / Hinglish"},
     ]
 
 
-# ── Standalone Test ────────────────────────────────────────────────────────────
+# ── Standalone test ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     print("=" * 60, flush=True)
-    print("Voice TTS Wrapper Test (delegates to TextToSpeech.py)", flush=True)
+    print("Voice TTS Facade Test", flush=True)
     print("=" * 60, flush=True)
 
-    test_texts = [
+    test_cases = [
         ("English neutral", "Hello! How are you today?", Emotion.NEUTRAL),
-        ("Excited", "Wow! That's amazing news!", Emotion.EXCITED),
-        ("Thinking", "Let me think about that for a moment...", Emotion.THINKING),
-        ("Friendly", "Sure, I can help you with that!", Emotion.FRIENDLY),
+        ("Excited",         "Wow! That's amazing news!", Emotion.EXCITED),
+        ("Thinking",        "Let me think about that...", Emotion.THINKING),
+        ("Friendly",        "Sure, I can help you with that!", Emotion.FRIENDLY),
     ]
 
-    config = TTSConfig.from_env()
-    print(f"\n[Config] Voice: {config.voice}", flush=True)
-
-    for name, text, emotion in test_texts:
+    for name, text, emotion in test_cases:
         print(f"\n[{name}] {text}", flush=True)
-        speak(text, emotion=emotion)
+        ok = speak(text, emotion=emotion)
+        print(f"  -> {'OK' if ok else 'FAILED'}", flush=True)
 
     print("\n[DONE]", flush=True)

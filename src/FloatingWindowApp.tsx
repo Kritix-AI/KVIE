@@ -10,6 +10,7 @@ import { isVoiceCommandIntent, executeVoiceCommand } from './lib/voiceCommandEng
 import { IncrementalTypingSession, processSpokenVoiceText } from './lib/incrementalTypingEngine'
 import { applyCustomDictionary } from './lib/customDictionary'
 import { expandVoiceSnippets } from './lib/snippetsEngine'
+import { consensusTranscription } from './lib/consensusEngine'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import FloatingMicWidget from './components/FloatingMicWidget'
 
@@ -46,54 +47,14 @@ export const FloatingWindowApp: React.FC = () => {
 
   const typingSessionRef = useRef<IncrementalTypingSession>(new IncrementalTypingSession())
   const lastFinalTranscriptRef = useRef('')
+  const [isConsensusMode, setIsConsensusMode] = useState(false)
+  const [consensusDraft, setConsensusDraft] = useState<string | null>(null)
+  const [consensusCount, setConsensusCount] = useState(0)
+  const consensusRef = useRef<string[]>([])
 
-  // ── Serialized injection queue to prevent race conditions ──────────────────
-  const injectionQueueRef = useRef<Array<() => Promise<void>>>([])
-  const isInjectingRef = useRef(false)
-  const injectAbortRef = useRef(false)
-
-  const drainInjectionQueue = useCallback(async () => {
-    if (isInjectingRef.current) return
-    isInjectingRef.current = true
-    injectAbortRef.current = false
-
-    while (injectionQueueRef.current.length > 0) {
-      if (injectAbortRef.current) break
-      const task = injectionQueueRef.current.shift()!
-      try {
-        await task()
-      } catch {
-        // individual injection failure — continue with next queued item
-      }
-    }
-    isInjectingRef.current = false
-  }, [])
-
-  // Helper: queue an injection so they execute strictly in order
-  const queueInjection = useCallback(async (eraseCount: number, appendText: string, message?: string) => {
-    return new Promise<void>((resolve, reject) => {
-      injectionQueueRef.current.push(async () => {
-        if (injectAbortRef.current) { resolve(); return }
-        try {
-          await tauriBridge.eraseAndInject(eraseCount, appendText)
-          if (message) setInjectionMessage(message)
-          resolve()
-        } catch (err) {
-          reject(err instanceof Error ? err : new Error(String(err)))
-        }
-      })
-      void drainInjectionQueue()
-    })
-  }, [drainInjectionQueue])
-
-  // Cancel all pending injections (called when recording stops)
-  const cancelPendingInjections = useCallback(() => {
-    injectAbortRef.current = true
-    injectionQueueRef.current = []
-    isInjectingRef.current = false
-  }, [])
-
-  // ── End serialized injection queue ─────────────────────────────────────────
+  useEffect(() => {
+    localStorage.setItem('kvie_consensus_mode', String(isConsensusMode))
+  }, [isConsensusMode])
 
   useEffect(() => {
     document.body.classList.add('floating-window-mode')
@@ -137,7 +98,6 @@ export const FloatingWindowApp: React.FC = () => {
   }, [speech.isListening, browserSpeech, localVoice])
 
   const clearAll = () => {
-    cancelPendingInjections()
     const fullText = typingSessionRef.current.getFullText()
     if (fullText) {
       void saveVoiceSession(fullText)
@@ -202,7 +162,15 @@ export const FloatingWindowApp: React.FC = () => {
 
     let isCancelled = false
 
-    const markCancelled = () => { isCancelled = true }
+    // ── CONSENSUS MODE: collect segments instead of typing ──
+    if (isConsensusMode && currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
+      lastFinalTranscriptRef.current = currentFinal
+      const next = [...consensusRef.current, currentFinal]
+      consensusRef.current = next
+      setConsensusCount(next.length)
+      setInjectionMessage(`Recording #${next.length} — speak again (2-3x)`)
+      return () => { isCancelled = true }
+    }
 
     // Case 1: Final segment arrived (e.g. after a pause)
     if (currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
@@ -217,41 +185,42 @@ export const FloatingWindowApp: React.FC = () => {
 
       if (newFinalPortion) {
         void (async () => {
-          try {
-            const processedFinal = await processSpokenVoiceText(newFinalPortion, {
-              applyTranslation: isTranslationEnabled,
-              targetLanguage,
-            })
-            if (isCancelled) return
+          // ── CRITICAL: Use the SAME processing pipeline as interim (line 191)
+          // for delta consistency. processSpokenVoiceText includes translation
+          // which changes words and breaks the delta calculation.
+          const processedFinal = applyCustomDictionary(
+            expandVoiceSnippets(newFinalPortion).expandedText
+          )
+          if (isCancelled) return
 
-            const delta = session.processSegment(processedFinal, true)
-            if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-              await queueInjection(delta.eraseCount, delta.appendText, isTranslationEnabled ? 'Translated & typed' : 'Typed & saved')
-            }
-          } catch (err) {
-            if (!isCancelled) setInjectionMessage(err instanceof Error ? err.message : String(err))
+          const delta = session.processSegment(processedFinal, true)
+          if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+            await tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText)
+            setInjectionMessage(isTranslationEnabled ? 'Typed & saved' : 'Typed & saved')
           }
-        })()
+        })().catch(err => {
+          setInjectionMessage(err instanceof Error ? err.message : String(err))
+        })
       }
-      return markCancelled
+      return () => { isCancelled = true }
     }
 
-    // Case 2: Active Interim speech clause while speaking — synchronous only
+    // Case 2: Active Interim speech clause while speaking
     if (currentInterim) {
-      try {
-        const quickInterim = applyCustomDictionary(expandVoiceSnippets(currentInterim).expandedText)
-        const delta = session.processSegment(quickInterim, false)
-        if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-          // Don't await — queue it so it doesn't block interim updates
-          void queueInjection(delta.eraseCount, delta.appendText, 'Typing...')
-        }
-      } catch {
-        // non-fatal interim processing error
+      // Instant synchronous dictionary correction & snippet expansion on interim preview
+      const quickInterim = applyCustomDictionary(expandVoiceSnippets(currentInterim).expandedText)
+      const delta = session.processSegment(quickInterim, false)
+      if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+        void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
+          setInjectionMessage('Typing...')
+        }).catch(err => {
+          setInjectionMessage(err instanceof Error ? err.message : String(err))
+        })
       }
     }
 
-    return markCancelled
-  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode, isTranslationEnabled, targetLanguage, queueInjection])
+    return () => { isCancelled = true }
+  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode, isTranslationEnabled, targetLanguage, isConsensusMode])
 
 
   const handleToggleListening = () => {
@@ -266,6 +235,44 @@ export const FloatingWindowApp: React.FC = () => {
       clearAll()
       void speech.startListening()
     }
+  }
+
+  const handleConsensusToggle = () => {
+    if (!isConsensusMode) {
+      // Start consensus mode
+      consensusRef.current = []
+      setConsensusCount(0)
+      setConsensusDraft(null)
+      setIsConsensusMode(true)
+    }
+  }
+
+  const handleConsensusComplete = () => {
+    if (consensusRef.current.length < 2) {
+      setInjectionMessage('Need at least 2 recordings for consensus')
+      setTimeout(() => setInjectionMessage(null), 3000)
+      return
+    }
+    // Stop listening before computing
+    if (speech.isListening) {
+      speech.stopListening()
+    }
+    const result = consensusTranscription(consensusRef.current)
+    setConsensusDraft(result)
+    setConsensusCount(0)
+    consensusRef.current = []
+    setIsConsensusMode(false)
+    // Type the consensus text directly (skip incremental engine)
+    void tauriBridge.eraseAndInject(0, result)
+      .then(() => {
+        setInjectionMessage('Consensus typed!')
+        setTimeout(() => setInjectionMessage(null), 2000)
+      })
+      .catch(err => {
+        setInjectionMessage('Consensus ready — copied to clipboard')
+        navigator.clipboard.writeText(result).catch(() => {})
+        setTimeout(() => setInjectionMessage(null), 3000)
+      })
   }
 
   const injectDraft = async () => {
@@ -300,15 +307,17 @@ export const FloatingWindowApp: React.FC = () => {
         isUniversalMode={isUniversalMode}
         isCommandMode={isCommandMode}
         isTranslationEnabled={isTranslationEnabled}
+        isConsensusMode={isConsensusMode}
+        consensusCount={consensusCount}
         targetLanguageName={SUPPORTED_LANGUAGES.find(l => l.code === targetLanguage)?.name || targetLanguage}
-        isDesktop={true}
-        isStandalone={true}
         onToggleListening={handleToggleListening}
         onToggleUniversalMode={() => setIsUniversalMode(prev => !prev)}
         onToggleCommandMode={() => setIsCommandMode(prev => !prev)}
         onToggleTranslation={handleToggleTranslation}
-        onInjectCurrentText={() => void injectDraft()}
+        onToggleConsensus={handleConsensusToggle}
+        onConsensusComplete={handleConsensusComplete}
         onClearText={clearAll}
+        onClose={() => tauriBridge.closeFloatingMic()}
         interimTranscript={speech.interimTranscript}
         recentTranscript={speech.transcript || localVoice.latestSegment}
         statusMessage={injectionMessage}

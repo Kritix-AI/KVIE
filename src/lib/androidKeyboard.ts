@@ -8,6 +8,10 @@ declare global {
       showKeyboardPicker?: () => void
       requestMicPermission?: () => void
       openSetupActivity?: () => void
+      setSelectedEngine?: (engineId: string) => void
+      getSelectedEngine?: () => string
+      setAccentColor?: (hexColor: string) => void
+      getAccentColor?: () => string
       isMicPermissionGranted?: () => boolean
       isKeyboardEnabled?: () => boolean
       getRecordedSessions?: () => string
@@ -112,5 +116,19 @@ export const isAndroidAccessibilityEnabled = (): boolean => {
     return window.AndroidKeyboardBridge?.isAccessibilityEnabled?.() ?? false
   } catch {
     return false
+  }
+}
+
+export const setAndroidKeyboardAccentColor = (color: string): void => {
+  try {
+    window.AndroidKeyboardBridge?.setAccentColor?.(color)
+  } catch {}
+}
+
+export const getAndroidKeyboardAccentColor = (): string => {
+  try {
+    return window.AndroidKeyboardBridge?.getAccentColor?.() || '#22d3ee'
+  } catch {
+    return '#22d3ee'
   }
 }

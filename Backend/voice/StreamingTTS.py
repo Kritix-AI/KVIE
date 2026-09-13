@@ -246,37 +246,51 @@ class StreamingTTSEngine:
 
     @staticmethod
     def _decode_audio_bytes(audio_bytes: bytes):
-        """Decode MP3/audio bytes to numpy float32 array."""
+        """Decode MP3/audio bytes to numpy float32 array.
+
+        Priority:
+          1. pydub  (handles MP3 natively via ffmpeg/libav)
+          2. soundfile  (WAV, FLAC, OGG — not bare MP3)
+          3. Temp-file soundfile fallback
+        """
+        # 1. Try pydub — handles MP3 without special libsndfile build
+        try:
+            from pydub import AudioSegment
+            import io as _io
+            seg = AudioSegment.from_file(_io.BytesIO(audio_bytes))
+            seg = seg.set_channels(1)
+            sr = seg.frame_rate
+            samples = np.array(seg.get_array_of_samples(), dtype=np.float32)
+            samples /= float(1 << (seg.sample_width * 8 - 1))
+            return samples, sr
+        except Exception:
+            pass
+
+        # 2. soundfile (WAV / FLAC / OGG)
         try:
             import soundfile as sf
-            # Try soundfile first (handles WAV, FLAC, OGG)
-            audio_np, sr = sf.read(io.BytesIO(audio_bytes), dtype='float32')
+            audio_np, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
             if audio_np.ndim > 1:
                 audio_np = audio_np.mean(axis=1)
             return audio_np, sr
         except Exception:
             pass
 
-        # Fallback: save to temp file and read
+        # 3. Temp-file soundfile fallback
         try:
             import tempfile
             import soundfile as sf
-
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             tmp.write(audio_bytes)
             tmp.close()
-
-            audio_np, sr = sf.read(tmp.name, dtype='float32')
+            audio_np, sr = sf.read(tmp.name, dtype="float32")
             if audio_np.ndim > 1:
                 audio_np = audio_np.mean(axis=1)
-
             try:
                 os.unlink(tmp.name)
             except Exception:
                 pass
-
             return audio_np, sr
-
         except Exception as e:
             print(f"[StreamingTTS] Audio decode error: {e}", flush=True)
             return None, 0

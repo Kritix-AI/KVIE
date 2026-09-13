@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -194,24 +195,49 @@ fn redo_document(state: tauri::State<'_, KvieState>) -> Result<DocumentSnapshot,
 fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
+        use std::thread;
+
         let mut enigo = Enigo::new(&Settings::default()).map_err(|error| format!("keyboard unavailable: {error}"))?;
+
+        // ── Phase 1: Erase only the changed characters with backspace ──────
+        // The erase_count comes from the IncrementalTypingEngine which tracks
+        // exactly how many characters of the interim text changed. We only
+        // backspace those — never touching committed text.
         if erase_count > 0 {
             for _ in 0..erase_count {
                 let _ = enigo.key(Key::Backspace, Direction::Click);
+                // Brief pause between backspaces for apps that process input slowly
+                thread::sleep(Duration::from_millis(5));
             }
+            // Small pause before typing new text
+            thread::sleep(Duration::from_millis(15));
         }
-        if !text.is_empty() {
-            if text.len() <= 20 && !text.contains('\n') {
-                let _ = enigo.text(&text);
-            } else {
-                let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
-                clipboard.set_text(&text).map_err(|error| format!("clipboard write failed: {error}"))?;
-                enigo.key(Key::Control, Direction::Press).map_err(|error| error.to_string())?;
-                enigo.key(Key::Other(0x56), Direction::Click).map_err(|error| error.to_string())?;
-                enigo.key(Key::Control, Direction::Release).map_err(|error| error.to_string())?;
-            }
+
+        // ── Phase 2: Clipboard paste (bypasses IME auto-correct) ────────
+        // Pasting the full text at once avoids Windows IME auto-correcting
+        // individual characters (e.g. "we" → "e") during char-by-char typing.
+        if text.is_empty() {
+            return Ok(());
         }
-        return Ok(());
+
+        let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
+        let text_clone = text.clone();
+        clipboard.set_text(text_clone).map_err(|error| format!("clipboard write failed: {error}"))?;
+
+        // Small human-like delay before paste (avoids instant-paste detection)
+        thread::sleep(Duration::from_millis(50));
+
+        let _ = enigo.key(Key::Control, Direction::Press);
+        let _ = enigo.key(Key::Other(0x56), Direction::Click);
+        let _ = enigo.key(Key::Control, Direction::Release);
+
+        // Clear clipboard after delay
+        thread::spawn(|| {
+            thread::sleep(Duration::from_secs(3));
+            let _ = Clipboard::new().and_then(|mut c| c.set_text(""));
+        });
+
+        Ok(())
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -238,6 +264,7 @@ fn open_floating_mic(app_handle: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("floating_mic") {
         let _ = window.show();
         let _ = window.set_focus();
+        let _ = apply_pill_window_shape(&window);
     }
     Ok(())
 }
@@ -258,8 +285,50 @@ fn toggle_floating_mic(app_handle: tauri::AppHandle) -> Result<(), String> {
         } else {
             let _ = window.show();
             let _ = window.set_focus();
+            let _ = apply_pill_window_shape(&window);
         }
     }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn apply_pill_window_shape(window: &tauri::WebviewWindow) -> Result<(), String> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateRoundRectRgn, SetWindowRgn,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, GetWindowLongPtrW, SetWindowLongPtrW,
+        GWL_STYLE, WS_CAPTION, WS_THICKFRAME,
+    };
+
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+
+    unsafe {
+        // Strip title bar and thickframe styles from the floating mic window
+        let style = GetWindowLongPtrW(hwnd.0 as isize, GWL_STYLE);
+        let new_style = style & !((WS_CAPTION | WS_THICKFRAME) as isize);
+        SetWindowLongPtrW(hwnd.0 as isize, GWL_STYLE, new_style);
+
+        let mut rect: windows_sys::Win32::Foundation::RECT = std::mem::zeroed();
+        GetWindowRect(hwnd.0 as isize, &mut rect);
+
+        let width = (rect.right - rect.left) as i32;
+        let height = (rect.bottom - rect.top) as i32;
+        let radius = (height / 2).max(1);
+
+        let region: windows_sys::Win32::Graphics::Gdi::HRGN = CreateRoundRectRgn(1, 1, width - 1, height - 1, radius, radius);
+        if region == 0 {
+            return Err("Failed to create round region".into());
+        }
+
+        SetWindowRgn(hwnd.0 as isize, region, 0);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_pill_window_shape(_window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
@@ -448,6 +517,9 @@ fn get_active_app_context() -> Result<ActiveAppContext, String> {
 
 #[tauri::command]
 fn inject_text(text: String) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("inject_text: text must not be empty or whitespace-only".to_string());
+    }
     erase_and_inject(0, text)
 }
 

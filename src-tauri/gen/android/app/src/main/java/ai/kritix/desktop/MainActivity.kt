@@ -204,6 +204,18 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
+    fun setAccentColor(hexColor: String) {
+      val prefs = activity.getSharedPreferences("kvie_prefs", android.content.Context.MODE_PRIVATE)
+      prefs.edit().putString("accent_color", hexColor).apply()
+    }
+
+    @JavascriptInterface
+    fun getAccentColor(): String {
+      val prefs = activity.getSharedPreferences("kvie_prefs", android.content.Context.MODE_PRIVATE)
+      return prefs.getString("accent_color", "#22d3ee") ?: "#22d3ee"
+    }
+
+    @JavascriptInterface
     fun isMicPermissionGranted(): Boolean {
       return ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }

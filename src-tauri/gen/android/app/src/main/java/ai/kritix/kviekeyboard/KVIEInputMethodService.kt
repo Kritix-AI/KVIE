@@ -17,17 +17,24 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.text.Editable
+import android.text.TextUtils
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
+import android.widget.ScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -35,7 +42,10 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.Normalizer
+import java.util.Locale
 
 /**
  * KVIE Next-Gen AI Voice & QWERTY Keyboard Input Method Service.
@@ -47,8 +57,13 @@ import kotlinx.coroutines.launch
  * 5. Instant 1-Tap AI Voice Dictation with 6 Voice Editing Commands
  * 6. Quick AI Action Chips (Formal, Casual, Shorten, To English) & Per-App Tone Defaults
  * 7. Dual Tactile Haptic & Acoustic Mechanical Key Click Feedback
+ * 8. Devanagari (Hindi) Inscript keyboard + live transliteration
+ * 9. Text snippet expansion (type shortcut → space → full text)
  */
 class KVIEInputMethodService : InputMethodService() {
+
+    // ── Mode ───────────────────────────────────────────────────────────────────
+    enum class Mode { TEXT, EMOJI, HINDI, SNIPPETS }
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var whisperEngine: WhisperEngine? = null
@@ -57,9 +72,12 @@ class KVIEInputMethodService : InputMethodService() {
     private var isListening = false
     private var isShifted = false
     private var isCapsLock = false
-    private var isSymbolsMode = false
+    private isSymbolsMode = false
     private var isSymbolsSecondaryPage = false
     private var isNumberRowVisible = true
+    private var currentMode = Mode.TEXT        // TEXT | EMOJI | HINDI | SNIPPETS
+    private var currentLang: Locale = Locale.ENGLISH
+    private var lastBuffer = StringBuilder()
 
     // Top Voice & Suggestion Toolbar
     private lateinit var voiceToolbar: LinearLayout
@@ -77,6 +95,224 @@ class KVIEInputMethodService : InputMethodService() {
     private lateinit var chipToneTranslate: TextView
     private lateinit var btnClipboard: ImageView
     private lateinit var btnNumberRowToggle: TextView
+    private lateinit var btnLangToggle: TextView
+    private lateinit var btnSnippets: TextView
+
+    // Dynamic Personal Dictionary & Autocorrect Engine
+    private lateinit var userLexiconDb: UserLexiconDatabase
+
+    data class AutocorrectRecord(
+        val originalWord: String,
+        val appliedWord: String,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+    private var lastAutocorrectRecord: AutocorrectRecord? = null
+    private val commonWordsSet by lazy { commonWords.map { it.lowercase() }.toHashSet() }
+
+    // ── Snippet map ────────────────────────────────────────────────────────────
+    private val snippets = linkedMapOf(
+        "brb" to "be right back",
+        "omw" to "on my way",
+        "tysm" to "thank you so much",
+        "idk" to "I don't know",
+        "np" to "no problem",
+        "thx" to "thanks",
+        "ty" to "thank you",
+        "gm" to "good morning",
+        "gn" to "good night",
+        "pls" to "please",
+        "plz" to "please",
+        "rn" to "right now",
+        "tbh" to "to be honest",
+        "ofc" to "of course",
+        "irl" to "in real life",
+        "asap" to "as soon as possible",
+        "msg" to "message",
+        "ikr" to "I know right",
+        "fyi" to "for your information",
+        "gtg" to "got to go",
+        "ttyl" to "talk to you later",
+        "bbl" to "be back later",
+        "afaik" to "as far as I know",
+        "smh" to "shaking my head",
+        "wyd" to "what are you doing",
+        "hbu" to "how about you",
+    )
+
+    // ── Transliteration map (Latin → Devanagari) ───────────────────────────────
+    private val translitMap = mapOf(
+        "aa" to "आ", "ee" to "ई", "oo" to "ऊ", "ai" to "ऐ", "au" to "औ",
+        "ksh" to "क्ष", "sh" to "श", "Sh" to "ष", "ny" to "ञ", "ng" to "ङ",
+        "ch" to "च", "chh" to "छ", "jh" to "झ", "th" to "थ", "dh" to "ध",
+        "bh" to "भ", "ph" to "फ", "gh" to "घ", "kh" to "ख",
+        "a" to "अ", "i" to "इ", "e" to "ए", "u" to "उ", "o" to "ओ",
+        "k" to "क", "g" to "ग", "c" to "क", "j" to "ज", "t" to "त",
+        "d" to "द", "n" to "न", "p" to "प", "b" to "ब", "m" to "म",
+        "y" to "य", "r" to "र", "l" to "ल", "v" to "व", "w" to "व",
+        "z" to "ज़", "f" to "फ़", "q" to "क़", "x" to "क्ष",
+        "h" to "ह", "s" to "स",
+        "1" to "१","2" to "२","3" to "३","4" to "४",
+        "5" to "५","6" to "६","7" to "७","8" to "८","9" to "९","0" to "०",
+    )
+
+    // ── Hindi consonant rows for the Inscript keyboard ─────────────────────────
+    private val hindiRow0 = listOf("1","2","3","4","5","6","7","8","9","0")
+    private val hindiRow1 = listOf("अ","आ","इ","ई","उ","ऊ","ए","ऐ","ओ","औ")
+    private val hindiRow2 = listOf("क","ख","ग","घ","ङ","च","छ","ज","झ","ञ")
+    private val hindiRow3 = listOf("ट","ठ","ड","ढ","ण","त","थ","द","ध","न")
+    private val hindiRow4 = listOf("प","फ","ब","भ","म","य","र","ल","व","श")
+    private val hindiRow5 = listOf("श्र","क्ष","त्","ड़","।","⎵","⌫","⏎")
+
+    // Dynamic App Accent Color Binding
+    private var currentAccentColor: Int = 0xFF22D3EE.toInt()
+    private var lastCompletedWord: String? = null
+    private var pendingVoiceValidationJob: Job? = null
+    private var lastDictatedWords: List<String> = emptyList()
+
+    // High-Accuracy / Most Common Word Dynamic Green Highlight
+    private val highAccuracyGreenColor = 0xFF00E676.toInt() // Vibrant Neon Green
+    private val secondarySuggestionColor = 0xFFA0A0B2.toInt() // Neutral Secondary
+    private var currentHighlightedPillIndex: Int = 0
+
+    private fun highlightBestSuggestion(bestIndex: Int) {
+        currentHighlightedPillIndex = bestIndex
+        val pills = listOf(
+            if (::suggestion1.isInitialized) suggestion1 else null,
+            if (::suggestion2.isInitialized) suggestion2 else null,
+            if (::suggestion3.isInitialized) suggestion3 else null
+        )
+
+        for (i in pills.indices) {
+            val pill = pills[i] ?: continue
+            if (i == bestIndex) {
+                // HIGHEST ACCURACY / MOST COMMON WORD: Vibrant Green Highlight
+                pill.setTextColor(highAccuracyGreenColor)
+                pill.setTypeface(null, Typeface.BOLD)
+
+                val greenBg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dpToPx(14f)
+                    val tint = (0x28 shl 24) or (highAccuracyGreenColor and 0x00FFFFFF)
+                    setColor(tint)
+                    setStroke(dpToPx(1.5f).toInt(), highAccuracyGreenColor)
+                }
+                pill.background = greenBg
+            } else {
+                // Secondary candidate: Subtle neutral grey
+                pill.setTextColor(secondarySuggestionColor)
+                pill.setTypeface(null, Typeface.NORMAL)
+                pill.setBackgroundResource(R.drawable.suggestion_pill_bg)
+            }
+        }
+    }
+
+    private fun extractContextWords(textBefore: String): Pair<String, String> {
+        val tokens = textBefore.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        val w1 = if (tokens.size >= 2) tokens[tokens.size - 2].lowercase() else ""
+        val w2 = if (tokens.isNotEmpty()) tokens.last().lowercase() else ""
+        return Pair(w1, w2)
+    }
+
+    private fun getWordCommonalityScore(word: String, typedPrefix: String, w1: String = "", w2: String = ""): Int {
+        val lower = word.lowercase().trim()
+        val typedLower = typedPrefix.lowercase().trim()
+
+        if (lower.isEmpty() || lower == "...") return 0
+
+        // 1. Calculate Base Commonality Score
+        val baseScore = if (::userLexiconDb.isInitialized && userLexiconDb.isPersonalWord(lower)) {
+            val personalMatches = userLexiconDb.getMatchingFrequentWords(typedLower, 5)
+            val rank = personalMatches.indexOf(lower)
+            if (rank != -1) 100 - rank * 4 else 92
+        } else {
+            val typoCorrection = grammarCorrections[typedLower]
+            if (typoCorrection != null && typoCorrection.equals(lower, ignoreCase = true)) {
+                96
+            } else if (lower == typedLower && commonWordsSet.contains(lower)) {
+                val commonRank = commonWords.indexOfFirst { it.equals(lower, ignoreCase = true) }
+                if (commonRank in 0..100) 94 else 85
+            } else {
+                val rank = commonWords.indexOfFirst { it.equals(lower, ignoreCase = true) }
+                when {
+                    rank in 0..15 -> 88
+                    rank in 16..60 -> 82
+                    rank in 61..250 -> 76
+                    rank in 251..1000 -> 68
+                    rank > 1000 -> 55
+                    else -> 45
+                }
+            }
+        }
+
+        // 2. Blend with Contextual Bandit Score (Cross-Modal Reinforcement Learning)
+        return ContextualBanditEngine.calculateBlendedScore(
+            w1 = w1,
+            w2 = w2,
+            candidate = lower,
+            baseScore = baseScore,
+            userLexiconDb = if (::userLexiconDb.isInitialized) userLexiconDb else null
+        )
+    }
+
+    private fun loadAccentColor(): Int {
+        val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
+        val hex = prefs.getString("accent_color", "#22d3ee") ?: "#22d3ee"
+        return try {
+            Color.parseColor(hex)
+        } catch (_: Exception) {
+            0xFF22D3EE.toInt()
+        }
+    }
+
+    private fun isColorBright(color: Int): Boolean {
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
+        val luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        return luminance > 0.55
+    }
+
+    private fun dpToPx(dp: Float): Float = dp * resources.displayMetrics.density
+
+    // ── Helper: dp() ───────────────────────────────────────────────────────────
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun applyAccentTheme() {
+        currentAccentColor = loadAccentColor()
+        val isBright = isColorBright(currentAccentColor)
+
+        // 1. Maintain dynamic suggestion highlight (Green on most accurate word)
+        highlightBestSuggestion(currentHighlightedPillIndex)
+
+        // 2. Enter Key Accent Styling
+        if (::keyEnter.isInitialized) {
+            val enterBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpToPx(7f)
+                setColor(currentAccentColor)
+            }
+            keyEnter.background = enterBg
+            keyEnter.setTextColor(if (isBright) 0xFF0E0E12.toInt() else 0xFFFFFFFF.toInt())
+        }
+
+        // 3. Toolbar Sparkle / Polish Button
+        if (::polishButton.isInitialized) {
+            polishButton.setColorFilter(currentAccentColor)
+        }
+
+        // 4. Number row toggle button
+        if (::btnNumberRowToggle.isInitialized) {
+            btnNumberRowToggle.setTextColor(if (isNumberRowVisible) currentAccentColor else 0xFF8E8E9E.toInt())
+        }
+
+        // 5. Shift key visual
+        updateShiftKeyVisual()
+
+        // 6. Language toggle button
+        if (::btnLangToggle.isInitialized) {
+            btnLangToggle.text = if (currentLang.language == "hi") "अ" else "A"
+        }
+    }
 
     // Clipboard Drawer
     private lateinit var clipboardDrawer: LinearLayout
@@ -115,6 +351,7 @@ class KVIEInputMethodService : InputMethodService() {
     private lateinit var tabObjects: TextView
     private lateinit var btnReturnToAbc: TextView
     private lateinit var btnEmojiBackspace: ImageView
+    private lateinit var modeOverlay: FrameLayout
     private var currentActiveEmojiCategory: List<String> = emptyList()
 
     private val numberKeys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
@@ -351,6 +588,7 @@ class KVIEInputMethodService : InputMethodService() {
     override fun onCreateInputView(): View {
         val view = layoutInflater.inflate(R.layout.keyboard_view, null)
         keyboardRootView = view
+        userLexiconDb = UserLexiconDatabase.getInstance(this)
 
         // Toolbar Views
         voiceToolbar = view.findViewById(R.id.voiceToolbar)
@@ -368,6 +606,8 @@ class KVIEInputMethodService : InputMethodService() {
         chipToneTranslate = view.findViewById(R.id.chipToneTranslate)
         btnClipboard = view.findViewById(R.id.btnClipboard)
         btnNumberRowToggle = view.findViewById(R.id.btnNumberRowToggle)
+        btnLangToggle = view.findViewById(R.id.btnLangToggle)
+        btnSnippets = view.findViewById(R.id.btnSnippets)
 
         // Clipboard Drawer Views
         clipboardDrawer = view.findViewById(R.id.clipboardDrawer)
@@ -404,6 +644,7 @@ class KVIEInputMethodService : InputMethodService() {
         tabObjects = view.findViewById(R.id.tabObjects)
         btnReturnToAbc = view.findViewById(R.id.btnReturnToAbc)
         btnEmojiBackspace = view.findViewById(R.id.btnEmojiBackspace)
+        modeOverlay = view.findViewById(R.id.modeOverlay)
 
         currentActiveEmojiCategory = smileyEmojis
 
@@ -414,7 +655,9 @@ class KVIEInputMethodService : InputMethodService() {
 
         populateNumberRow()
         populateKeys()
+        applyAccentTheme()
         updateSuggestions()
+        updateEnterKeyActionVisual()
 
         return view
     }
@@ -473,13 +716,23 @@ class KVIEInputMethodService : InputMethodService() {
             performKeyHaptic()
             isNumberRowVisible = !isNumberRowVisible
             rowNumbers.visibility = if (isNumberRowVisible) View.VISIBLE else View.GONE
-            btnNumberRowToggle.setTextColor(if (isNumberRowVisible) 0xFF00E5FF.toInt() else 0xFF8E8E9E.toInt())
+            btnNumberRowToggle.setTextColor(if (isNumberRowVisible) currentAccentColor else 0xFF8E8E9E.toInt())
         }
 
         view.findViewById<ImageButton>(R.id.switchKeyboardButton)?.setOnClickListener {
             performKeyHaptic()
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
             imm?.showInputMethodPicker()
+        }
+
+        btnLangToggle.setOnClickListener {
+            performKeyHaptic()
+            switchLanguage()
+        }
+
+        btnSnippets.setOnClickListener {
+            performKeyHaptic()
+            switchMode(Mode.SNIPPETS)
         }
 
         suggestion1.setOnClickListener { applySuggestion(suggestion1.text.toString()) }
@@ -524,7 +777,45 @@ class KVIEInputMethodService : InputMethodService() {
 
         keySpace.setOnClickListener {
             performKeyHaptic()
-            currentInputConnection?.commitText(" ", 1)
+            val ic = currentInputConnection ?: return@setOnClickListener
+
+            // Record word for personal dictionary
+            val textBefore = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+            val currentWord = textBefore.substringAfterLast(" ", textBefore).trim()
+            if (currentWord.isNotEmpty()) {
+                if (::userLexiconDb.isInitialized) {
+                    userLexiconDb.recordWordTyped(currentWord)
+                    if (lastCompletedWord != null) {
+                        userLexiconDb.recordTransition(lastCompletedWord!!, currentWord)
+                    }
+                }
+                lastCompletedWord = currentWord
+                lastAutocorrectRecord = null
+            }
+
+            // 1. Check snippet trigger
+            val word = currentWord
+            val snippetExpansion = snippets[word.lowercase(Locale.getDefault())]
+            if (snippetExpansion != null) {
+                ic.deleteSurroundingText(word.length + 1, 0)
+                ic.commitText(snippetExpansion + " ", 1)
+                updateSuggestions()
+                return@setOnClickListener
+            }
+
+            // 2. Live transliteration if in Hindi mode
+            if (currentLang.language == "hi" && word.isNotEmpty()) {
+                val translit = tryTransliterate(word)
+                if (translit != word) {
+                    ic.deleteSurroundingText(word.length, 0)
+                    ic.commitText(translit + " ", 1)
+                    updateSuggestions()
+                    return@setOnClickListener
+                }
+            }
+
+            // 3. Regular space
+            ic.commitText(" ", 1)
             if (!isCapsLock && isShifted) {
                 isShifted = false
                 updateShiftKeyVisual()
@@ -548,6 +839,13 @@ class KVIEInputMethodService : InputMethodService() {
         keyEnter.setOnClickListener {
             performKeyHaptic()
             handleEnterKey()
+        }
+
+        keyEnter.setOnLongClickListener {
+            performKeyHaptic()
+            insertNewline()
+            updateSuggestions()
+            true
         }
 
         setupBackspaceKey()
@@ -672,6 +970,7 @@ class KVIEInputMethodService : InputMethodService() {
     private fun setupKeyTouchAndLongPress(keyView: TextView, primaryChar: String, altChar: String?) {
         keyView.setOnClickListener {
             performKeyHaptic()
+            lastAutocorrectRecord = null
             currentInputConnection?.commitText(primaryChar, 1)
             if (isShifted && !isCapsLock) {
                 isShifted = false
@@ -709,13 +1008,14 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun updateShiftKeyVisual() {
+        if (!::keyShift.isInitialized) return
         if (isSymbolsMode) {
             keyShift.text = if (isSymbolsSecondaryPage) "1/2" else "2/2"
-            keyShift.setTextColor(0xFF00E5FF.toInt())
+            keyShift.setTextColor(currentAccentColor)
         } else {
             keyShift.text = "⇧"
             when {
-                isCapsLock -> keyShift.setTextColor(0xFF00E5FF.toInt())
+                isCapsLock -> keyShift.setTextColor(currentAccentColor)
                 isShifted -> keyShift.setTextColor(0xFFD7FB52.toInt())
                 else -> keyShift.setTextColor(0xFFFFFFFF.toInt())
             }
@@ -728,6 +1028,269 @@ class KVIEInputMethodService : InputMethodService() {
         isShifted = false
         isCapsLock = false
         populateKeys()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Mode Switching (TEXT / EMOJI / HINDI / SNIPPETS)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private fun switchMode(mode: Mode) {
+        currentMode = mode
+        modeOverlay.removeAllViews()
+        when (mode) {
+            Mode.TEXT -> {
+                qwertyContainer.visibility = View.VISIBLE
+                modeOverlay.visibility = View.GONE
+            }
+            Mode.EMOJI -> showEmojiDrawer()
+            Mode.HINDI -> showHindiKeyboard()
+            Mode.SNIPPETS -> showSnippetKeyboard()
+        }
+    }
+
+    private fun switchLanguage() {
+        currentLang = when (currentLang.language) {
+            "en" -> Locale("hi")
+            "hi" -> Locale.ENGLISH
+            else -> Locale.ENGLISH
+        }
+        btnLangToggle.text = if (currentLang.language == "hi") "अ" else "A"
+        if (currentMode == Mode.TEXT) {
+            switchMode(Mode.TEXT)
+        }
+    }
+
+    private fun setModeOverlayVisible(visible: Boolean) {
+        if (visible) {
+            qwertyContainer.visibility = View.GONE
+            emojiDrawer.visibility = View.GONE
+            modeOverlay.visibility = View.VISIBLE
+        } else {
+            modeOverlay.visibility = View.GONE
+            qwertyContainer.visibility = View.VISIBLE
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Hindi Keyboard (Devanagari Inscript Layout)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private fun showHindiKeyboard() {
+        setModeOverlayVisible(true)
+        modeOverlay.removeAllViews()
+
+        val scroll = ScrollView(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        scroll.addView(container)
+        modeOverlay.addView(scroll)
+
+        container.addView(TextView(this).apply {
+            text = "Type in Devanagari (Inscript layout)"
+            setTextColor(Color.parseColor("#888888"))
+            textSize = 12f
+            setPadding(dp(4), dp(2), dp(4), dp(6))
+        })
+
+        container.addView(buildHindiRow(hindiRow0, isSpecial = false))
+        container.addView(buildHindiRow(hindiRow1, isSpecial = false))
+        container.addView(buildHindiRow(hindiRow2, isSpecial = false))
+        container.addView(buildHindiRow(hindiRow3, isSpecial = false))
+        container.addView(buildHindiRow(hindiRow4, isSpecial = false))
+
+        val lastRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        for (key in hindiRow5) {
+            when (key) {
+                "⎵" -> lastRow.addView(makeHindiKey(key, " ", weight = 5f))
+                "⌫" -> lastRow.addView(makeHindiKey(key, "", weight = 1.5f, isSpecial = true).also {
+                    it.setOnClickListener { currentInputConnection?.deleteSurroundingText(1, 0) }
+                })
+                "⏎" -> lastRow.addView(makeHindiKey(key, "\n", weight = 1.8f, isSpecial = true).also {
+                    it.setOnClickListener { currentInputConnection?.commitText("\n", 1) }
+                })
+                else -> lastRow.addView(makeHindiKey(key, key, weight = 1f, isSpecial = true))
+            }
+        }
+        container.addView(lastRow)
+
+        container.addView(Button(this).apply {
+            text = "⌨ English"
+            textSize = 14f
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
+            background = resources.getDrawable(android.R.attr.selectableItemBackground, theme)
+            setTextColor(Color.parseColor("#D7FB52"))
+            setOnClickListener { switchMode(Mode.TEXT) }
+        })
+    }
+
+    private fun buildHindiRow(keys: List<String>, isSpecial: Boolean): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        for (key in keys) {
+            row.addView(makeHindiKey(key, key, weight = 1f, isSpecial = isSpecial))
+        }
+        return row
+    }
+
+    private fun makeHindiKey(label: String, output: String, weight: Float = 1f, isSpecial: Boolean = false): Button {
+        return Button(this).apply {
+            text = label
+            textSize = if (label.length > 1) 13f else 20f
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(2), dp(4), dp(2), dp(4))
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), weight).apply {
+                rightMargin = dp(2)
+                leftMargin = dp(2)
+                topMargin = dp(1)
+                bottomMargin = dp(1)
+            }
+            setBackgroundColor(Color.parseColor("#2A2A2A"))
+            setTextColor(Color.WHITE)
+        }.also {
+            it.setOnClickListener { commitHindiText(output) }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Snippet Keyboard
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private fun showSnippetKeyboard() {
+        setModeOverlayVisible(true)
+        modeOverlay.removeAllViews()
+
+        val scroll = ScrollView(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        scroll.addView(container)
+        modeOverlay.addView(scroll)
+
+        for ((shortcut, expansion) in snippets) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            row.addView(Button(this).apply {
+                text = shortcut
+                textSize = 16f
+                setTypeface(null, Typeface.BOLD)
+                minWidth = 0
+                minHeight = 0
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                layoutParams = LinearLayout.LayoutParams(dp(100), dp(44)).apply {
+                    rightMargin = dp(4)
+                }
+                background = resources.getDrawable(android.R.attr.selectableItemBackground, theme)
+                setTextColor(Color.parseColor("#D7FB52"))
+                setOnClickListener { commitSnippet(shortcut, expansion) }
+            })
+
+            row.addView(TextView(this).apply {
+                text = "→"
+                textSize = 20f
+                setTextColor(Color.parseColor("#888888"))
+                layoutParams = LinearLayout.LayoutParams(dp(36), dp(44)).apply {
+                    gravity = Gravity.CENTER
+                }
+            })
+
+            row.addView(Button(this).apply {
+                text = expansion
+                textSize = 14f
+                minWidth = 0
+                minHeight = 0
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                    leftMargin = dp(4)
+                }
+                background = resources.getDrawable(android.R.attr.selectableItemBackground, theme)
+                setTextColor(Color.WHITE)
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity = Gravity.START
+                setOnClickListener { commitSnippet(shortcut, expansion) }
+            })
+
+            container.addView(row)
+        }
+
+        container.addView(Button(this).apply {
+            text = "⌨ Keyboard"
+            textSize = 14f
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(10) }
+            background = resources.getDrawable(android.R.attr.selectableItemBackground, theme)
+            setTextColor(Color.parseColor("#D7FB52"))
+            setOnClickListener { switchMode(Mode.TEXT) }
+        })
+    }
+
+    private fun commitSnippet(shortcut: String, expansion: String) {
+        val ic = currentInputConnection ?: return
+        ic.deleteSurroundingText(shortcut.length + 1, 0)
+        ic.commitText(expansion + " ", 1)
+        lastBuffer = StringBuilder()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Transliteration (Latin → Devanagari)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private fun tryTransliterate(word: String): String {
+        if (currentLang.language != "hi") return word
+
+        val lower = word.lowercase(Locale.getDefault())
+        var result = ""
+        var i = 0
+        while (i < lower.length) {
+            var matched = false
+            for (len in kotlin.math.min(4, lower.length - i) downTo 1) {
+                val chunk = lower.substring(i, i + len)
+                val replacement = translitMap[chunk]
+                if (replacement != null) {
+                    result = result + replacement
+                    i += len
+                    matched = true
+                    break
+                }
+            }
+            if (!matched) {
+                result += lower[i]
+                i++
+            }
+        }
+        return result.ifEmpty { word }
+    }
+
+    private fun commitHindiText(text: String) {
+        val ic = currentInputConnection ?: return
+        ic.commitText(text, 1)
+        if (text.length <= 1) {
+            lastBuffer.append(text)
+        }
     }
 
     // ───────────── INTERACTIVE AUTOCORRECT & CONTEXTUAL PREDICTION ─────────────
@@ -755,54 +1318,145 @@ class KVIEInputMethodService : InputMethodService() {
 
     private fun updateSuggestions() {
         val ic = currentInputConnection ?: return
-        val textBefore = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        val textBefore = ic.getTextBeforeCursor(80, 0)?.toString().orEmpty()
         val isSentenceStart = checkIsSentenceStart(textBefore.dropLastWhile { !it.isWhitespace() })
 
         val hasTrailingSpace = textBefore.endsWith(" ") || textBefore.isEmpty()
         val currentWord = if (hasTrailingSpace) "" else textBefore.substringAfterLast(" ", textBefore).trim()
 
+        // ───────────── 1. HIGH-ACCURACY SENTENCE PREDICTION (Space or Sentence Start) ─────────────
         if (currentWord.isEmpty()) {
-            val prevWord = textBefore.trimEnd().substringAfterLast(" ", "").lowercase()
-            val nextWordPredictions = bigramContext[prevWord]
+            val scoredList = SentencePredictor.predictNextWords(
+                textBefore = textBefore,
+                isSentenceStart = isSentenceStart,
+                userLexiconDb = if (::userLexiconDb.isInitialized) userLexiconDb else null,
+                limit = 3
+            )
 
-            if (!nextWordPredictions.isNullOrEmpty()) {
-                suggestion1.text = formatSuggestion(nextWordPredictions[0], "", isSentenceStart)
-                suggestion2.text = formatSuggestion(nextWordPredictions.getOrElse(1) { "the" }, "", isSentenceStart)
-                suggestion3.text = formatSuggestion(nextWordPredictions.getOrElse(2) { "I" }, "", isSentenceStart)
-            } else {
-                if (isSentenceStart) {
-                    suggestion1.text = "The"
-                    suggestion2.text = "I"
-                    suggestion3.text = "How"
-                } else {
-                    suggestion1.text = "the"
-                    suggestion2.text = "and"
-                    suggestion3.text = "to"
-                }
-            }
+            val c1 = scoredList.getOrNull(0)?.let { formatSuggestion(it.word, "", isSentenceStart) } ?: "I"
+            val c2 = scoredList.getOrNull(1)?.let { formatSuggestion(it.word, "", isSentenceStart) } ?: "the"
+            val c3 = scoredList.getOrNull(2)?.let { formatSuggestion(it.word, "", isSentenceStart) } ?: "you"
+
+            suggestion1.text = c1
+            suggestion2.text = c2
+            suggestion3.text = c3
+
+            // Candidate 0 is the highest accuracy candidate for the sentence -> GREEN HIGHLIGHT
+            highlightBestSuggestion(0)
             return
         }
 
+        // ───────────── 2. WORD COMPLETION & AUTOCORRECT WITH COMMONALITY SCORING ─────────────
         val lower = currentWord.lowercase()
-        val correction = grammarCorrections[lower]
 
-        if (correction != null) {
-            val formatted = formatSuggestion(correction, currentWord, isSentenceStart)
-            suggestion1.text = formatted
-            suggestion2.text = currentWord
-            val matches = commonWords.filter { it.startsWith(lower, ignoreCase = true) && !it.equals(correction, ignoreCase = true) }
-            suggestion3.text = matches.firstOrNull()?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
+        // Tier 1: Personal Dynamic Lexicon (Learned words with frequency >= 2)
+        val personalMatches = if (::userLexiconDb.isInitialized) {
+            userLexiconDb.getMatchingFrequentWords(currentWord, 3)
+        } else emptyList()
+
+        if (personalMatches.isNotEmpty() && personalMatches[0].equals(lower, ignoreCase = true)) {
+            val c1 = formatSuggestion(personalMatches[0], currentWord, isSentenceStart)
+            val fallbackMatches = commonWords.filter { it.startsWith(lower, ignoreCase = true) && !it.equals(lower, ignoreCase = true) }
+            val c2 = personalMatches.getOrNull(1)?.let { formatSuggestion(it, currentWord, isSentenceStart) }
+                ?: fallbackMatches.getOrNull(0)?.let { formatSuggestion(it, currentWord, isSentenceStart) }
+                ?: currentWord
+            val c3 = personalMatches.getOrNull(2)?.let { formatSuggestion(it, currentWord, isSentenceStart) }
+                ?: fallbackMatches.getOrNull(1)?.let { formatSuggestion(it, currentWord, isSentenceStart) }
+                ?: "..."
+
+            suggestion1.text = c1
+            suggestion2.text = c2
+            suggestion3.text = c3
+
+            val (w1, w2) = extractContextWords(textBefore.removeSuffix(currentWord))
+            val s1 = getWordCommonalityScore(c1, currentWord, w1, w2)
+            val s2 = getWordCommonalityScore(c2, currentWord, w1, w2)
+            val s3 = getWordCommonalityScore(c3, currentWord, w1, w2)
+            val bestIdx = when {
+                s2 > s1 && s2 >= s3 -> 1
+                s3 > s1 && s3 > s2 -> 2
+                else -> 0
+            }
+            highlightBestSuggestion(bestIdx)
             return
         }
 
-        val matches = commonWords.filter { it.startsWith(lower, ignoreCase = true) }
-        val c1 = matches.getOrNull(0)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: currentWord
-        val c2 = if (matches.size > 1) formatSuggestion(matches[1], currentWord, isSentenceStart) else currentWord
-        val c3 = matches.getOrNull(2)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
+        // Tier 2: Grammar, Typo & Brand Corrections (Unless suppressed by user undo)
+        val correction = grammarCorrections[lower]
+        val isSuppressed = ::userLexiconDb.isInitialized && correction != null && userLexiconDb.isCorrectionSuppressed(currentWord, correction)
+        if (correction != null && !isSuppressed) {
+            val formatted = formatSuggestion(correction, currentWord, isSentenceStart)
+            val c1 = formatted
+            val c2 = currentWord // Keep literal
+            val matches = commonWords.filter { it.startsWith(lower, ignoreCase = true) && !it.equals(correction, ignoreCase = true) }
+            val c3 = matches.firstOrNull()?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
+
+            suggestion1.text = c1
+            suggestion2.text = c2
+            suggestion3.text = c3
+
+            // Correction has higher accuracy than the typo: Pill 1 is GREEN
+            highlightBestSuggestion(0)
+            return
+        }
+
+        // Tier 3: Spatial Neighbor QWERTY Correction (e.g. 'yiu' -> 'you', 'wprk' -> 'work')
+        val isKnownWord = commonWordsSet.contains(lower) || (::userLexiconDb.isInitialized && userLexiconDb.isPersonalWord(lower))
+        if (!isKnownWord && currentWord.length >= 2) {
+            val spatialCandidates = SpatialCorrector.findCorrections(
+                currentWord,
+                isWordValid = { cand ->
+                    val inDict = commonWordsSet.contains(cand) || (::userLexiconDb.isInitialized && userLexiconDb.isPersonalWord(cand))
+                    inDict && !(::userLexiconDb.isInitialized && userLexiconDb.isCorrectionSuppressed(currentWord, cand))
+                },
+                maxResults = 2
+            )
+            if (spatialCandidates.isNotEmpty()) {
+                val c1 = formatSuggestion(spatialCandidates[0], currentWord, isSentenceStart)
+                val c2 = currentWord // Keep literal typed
+                val secondSpatial = spatialCandidates.getOrNull(1)
+                val fallbackMatches = commonWords.filter { it.startsWith(lower, ignoreCase = true) }
+                val c3 = secondSpatial?.let { formatSuggestion(it, currentWord, isSentenceStart) }
+                    ?: fallbackMatches.firstOrNull()?.let { formatSuggestion(it, currentWord, isSentenceStart) }
+                    ?: "..."
+
+                suggestion1.text = c1
+                suggestion2.text = c2
+                suggestion3.text = c3
+
+                // Spatial correction is higher accuracy than typo: Pill 1 is GREEN
+                highlightBestSuggestion(0)
+                return
+            }
+        }
+
+        // Tier 4: Standard Prefix Autocomplete (Prioritizing Personal Lexicon matches)
+        val candidatePool = if (personalMatches.isNotEmpty()) {
+            (personalMatches + commonWords.filter { it.startsWith(lower, ignoreCase = true) }).distinct()
+        } else {
+            commonWords.filter { it.startsWith(lower, ignoreCase = true) }
+        }
+
+        val c1 = candidatePool.getOrNull(0)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: currentWord
+        val c2 = if (candidatePool.size > 1) formatSuggestion(candidatePool[1], currentWord, isSentenceStart) else currentWord
+        val c3 = candidatePool.getOrNull(2)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
 
         suggestion1.text = c1
         suggestion2.text = c2
         suggestion3.text = c3
+
+        // Dynamically score all three pills with contextual bandit weighting
+        val (w1, w2) = extractContextWords(textBefore.removeSuffix(currentWord))
+        val s1 = getWordCommonalityScore(c1, currentWord, w1, w2)
+        val s2 = getWordCommonalityScore(c2, currentWord, w1, w2)
+        val s3 = getWordCommonalityScore(c3, currentWord, w1, w2)
+
+        val bestIdx = when {
+            s2 > s1 && s2 >= s3 -> 1
+            s3 > s1 && s3 > s2 -> 2
+            else -> 0
+        }
+        highlightBestSuggestion(bestIdx)
     }
 
     private fun applySuggestion(candidate: String) {
@@ -812,10 +1466,31 @@ class KVIEInputMethodService : InputMethodService() {
 
         val textBefore = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
         val currentWord = textBefore.substringAfterLast(" ", textBefore).trim()
+        val (w1, w2) = extractContextWords(textBefore.removeSuffix(currentWord))
+
         if (currentWord.isNotEmpty()) {
             ic.deleteSurroundingText(currentWord.length, 0)
         }
         ic.commitText(candidate + " ", 1)
+
+        // Set up undo record if autocorrect changed the word
+        if (currentWord.isNotEmpty() && !currentWord.equals(candidate, ignoreCase = true)) {
+            lastAutocorrectRecord = AutocorrectRecord(currentWord, candidate)
+        } else {
+            lastAutocorrectRecord = null
+        }
+
+        // Increment frequency in personal lexicon and record word transition
+        if (::userLexiconDb.isInitialized) {
+            userLexiconDb.recordWordTyped(candidate)
+            if (lastCompletedWord != null) {
+                userLexiconDb.recordTransition(lastCompletedWord!!, candidate)
+            }
+            // Reward the Contextual Bandit (+1.0 for explicit user tap)
+            ContextualBanditEngine.rewardSuggestionAccepted(w1, w2, candidate, userLexiconDb)
+        }
+        lastCompletedWord = candidate
+
         updateSuggestions()
     }
 
@@ -1012,6 +1687,68 @@ class KVIEInputMethodService : InputMethodService() {
                     v.isPressed = true
                     isBackspaceHolding = true
                     performKeyHaptic()
+
+                    // ───────────── AUTOCORRECT UNDO-LEARNING LOOP ─────────────
+                    val undoRecord = lastAutocorrectRecord
+                    val ic = currentInputConnection
+                    if (undoRecord != null && ic != null && (System.currentTimeMillis() - undoRecord.timestamp < 5000)) {
+                        val textBefore = ic.getTextBeforeCursor(undoRecord.appliedWord.length + 2, 0)?.toString().orEmpty()
+                        val withSpace = undoRecord.appliedWord + " "
+                        val withoutSpace = undoRecord.appliedWord
+
+                        if (textBefore.endsWith(withSpace)) {
+                            // Immediately revert text buffer back to what the user actually typed
+                            ic.deleteSurroundingText(withSpace.length, 0)
+                            ic.commitText(undoRecord.originalWord, 1)
+                            if (::userLexiconDb.isInitialized) {
+                                userLexiconDb.suppressCorrection(undoRecord.originalWord, undoRecord.appliedWord)
+                                val fullText = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+                                val (w1, w2) = extractContextWords(fullText)
+                                ContextualBanditEngine.rewardAutocorrectUndone(
+                                    w1 = w1,
+                                    w2 = w2,
+                                    originalTyped = undoRecord.originalWord,
+                                    rejectedCorrection = undoRecord.appliedWord,
+                                    userLexiconDb = userLexiconDb
+                                )
+                            }
+                            lastAutocorrectRecord = null
+                            updateSuggestions()
+                            return@setOnTouchListener true
+                        } else if (textBefore.endsWith(withoutSpace)) {
+                            ic.deleteSurroundingText(withoutSpace.length, 0)
+                            ic.commitText(undoRecord.originalWord, 1)
+                            if (::userLexiconDb.isInitialized) {
+                                userLexiconDb.suppressCorrection(undoRecord.originalWord, undoRecord.appliedWord)
+                                val fullText = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+                                val (w1, w2) = extractContextWords(fullText)
+                                ContextualBanditEngine.rewardAutocorrectUndone(
+                                    w1 = w1,
+                                    w2 = w2,
+                                    originalTyped = undoRecord.originalWord,
+                                    rejectedCorrection = undoRecord.appliedWord,
+                                    userLexiconDb = userLexiconDb
+                                )
+                            }
+                            lastAutocorrectRecord = null
+                            updateSuggestions()
+                            return@setOnTouchListener true
+                        }
+                    }
+                    lastAutocorrectRecord = null
+
+                    // If user is backspacing right after voice dictation, penalize that word in the bandit
+                    if (pendingVoiceValidationJob?.isActive == true && lastDictatedWords.isNotEmpty()) {
+                        pendingVoiceValidationJob?.cancel()
+                        val fullText = ic?.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+                        val (w1, w2) = extractContextWords(fullText)
+                        val deletedWord = lastDictatedWords.lastOrNull().orEmpty()
+                        if (::userLexiconDb.isInitialized && deletedWord.isNotEmpty()) {
+                            ContextualBanditEngine.rewardVoiceWordDeleted(w1, w2, deletedWord, userLexiconDb)
+                        }
+                        lastDictatedWords = emptyList()
+                    }
+
                     currentInputConnection?.deleteSurroundingText(1, 0)
                     updateSuggestions()
                     backspaceHandler.postDelayed(backspaceRunnable, 400)
@@ -1028,24 +1765,231 @@ class KVIEInputMethodService : InputMethodService() {
         }
     }
 
+    private val chatAppPackages = hashSetOf(
+        "whatsapp",
+        "telegram",
+        "challegram",
+        "instagram",
+        "facebook.orca",
+        "facebook.mlite",
+        "discord",
+        "slack",
+        "thoughtcrime.securesms",
+        "messaging",
+        "mms",
+        "twitter",
+        "snapchat",
+        "linkedin",
+        "reddit",
+        "viber",
+        "skype",
+        "teams",
+        "line"
+    )
+
+    private fun isMultilineField(info: EditorInfo?): Boolean {
+        if (info == null) return false
+        val inputType = info.inputType
+        val inputClass = inputType and EditorInfo.TYPE_MASK_CLASS
+        if (inputClass != EditorInfo.TYPE_CLASS_TEXT) return false
+        return (inputType and EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0 ||
+               (inputType and EditorInfo.TYPE_TEXT_FLAG_IME_MULTI_LINE) != 0
+    }
+
+    /**
+     * Decides whether the Enter key should produce a newline or an IME action.
+     * Checks the app-declared IME action FIRST (fastest, most reliable), then
+     * falls back to the live Accessibility scan, then to the hardcoded app list.
+     */
+    private fun isSendButtonPresent(editorInfo: EditorInfo?): Boolean {
+        val info = editorInfo ?: currentInputEditorInfo ?: return false
+        val pkg = (info.packageName ?: lastActivePackageName).orEmpty().lowercase()
+        val imeAction = info.imeOptions and EditorInfo.IME_MASK_ACTION
+
+        // 1. App-declared SEND action means Enter acts as send
+        if (imeAction == EditorInfo.IME_ACTION_SEND) return true
+
+        // 2. NO_ENTER_ACTION flag → field wants newline, not send
+        if ((info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return false
+
+        // 3. Search/Go fields should never show send behavior
+        if (imeAction == EditorInfo.IME_ACTION_SEARCH || imeAction == EditorInfo.IME_ACTION_GO) return false
+
+        // 4. Live Accessibility scan for on-screen send buttons
+        if (KVIEAccessibilityService.hasSendButtonOnScreen()) return true
+
+        // 5. Known chat apps always have an on-screen send button in their composer
+        if (chatAppPackages.any { pkg.contains(it) }) return true
+
+        // 6. Multiline fields (notes, comments, emails) have external submit/send
+        if (isMultilineField(info)) return true
+
+        return false
+    }
+
+    private fun updateEnterKeyActionVisual() {
+        val editorInfo = currentInputEditorInfo ?: return
+        if (!::keyEnter.isInitialized) return
+
+        val sendPresent = isSendButtonPresent(editorInfo)
+        val hasNoEnterAction = (editorInfo.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
+        val imeAction = editorInfo.imeOptions and EditorInfo.IME_MASK_ACTION
+
+        // Where an on-screen send button is present: show newline "↵"
+        if (sendPresent || hasNoEnterAction) {
+            keyEnter.text = "↵"
+            keyEnter.textSize = 20f
+            return
+        }
+
+        // Where an on-screen send button is NOT present: show action button (Send, Search, Go, Next, Done)
+        when (imeAction) {
+            EditorInfo.IME_ACTION_SEARCH -> {
+                keyEnter.text = "🔍"
+                keyEnter.textSize = 16f
+            }
+            EditorInfo.IME_ACTION_GO -> {
+                keyEnter.text = "Go"
+                keyEnter.textSize = 15f
+            }
+            EditorInfo.IME_ACTION_NEXT -> {
+                keyEnter.text = "Next"
+                keyEnter.textSize = 14f
+            }
+            EditorInfo.IME_ACTION_DONE -> {
+                keyEnter.text = "✓"
+                keyEnter.textSize = 18f
+            }
+            EditorInfo.IME_ACTION_SEND -> {
+                keyEnter.text = "➤"
+                keyEnter.textSize = 18f
+            }
+            else -> {
+                keyEnter.text = "➤"
+                keyEnter.textSize = 18f
+            }
+        }
+    }
+
     private fun handleEnterKey() {
         val ic = currentInputConnection ?: return
         val editorInfo = currentInputEditorInfo
+
+        if (editorInfo == null) {
+            insertNewline()
+            updateSuggestions()
+            return
+        }
+
+        val action = resolveEnterAction(editorInfo)
+
+        // Primary: try the action (send/search/go/etc.)
+        val handled = ic.performEditorAction(action)
+        if (handled) {
+            updateSuggestions()
+            return
+        }
+
+        // Fallback 1: try commitText for newline (works in WebViews, many custom EditTexts)
+        val fallback = commitTextFallback(editorInfo, action)
+        if (fallback) {
+            updateSuggestions()
+            return
+        }
+
+        // Fallback 2: raw key event (last resort)
+        sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+        updateSuggestions()
+    }
+
+    /**
+     * Determines the correct IME action for Enter based on EditorInfo + live app context.
+     */
+    private fun resolveEnterAction(editorInfo: EditorInfo): Int {
         val imeAction = editorInfo.imeOptions and EditorInfo.IME_MASK_ACTION
 
-        when (imeAction) {
+        // If the app explicitly declares SEND action, use it
+        if (imeAction == EditorInfo.IME_ACTION_SEND) return EditorInfo.IME_ACTION_SEND
+
+        // If NO_ENTER_ACTION flag is set, the field wants a newline
+        if ((editorInfo.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) {
+            return IME_ACTION_NEWLINE_FALLBACK
+        }
+
+        // Check if an on-screen send button is present → use newline
+        if (isSendButtonPresent(editorInfo)) {
+            return IME_ACTION_NEWLINE_FALLBACK
+        }
+
+        // No send button present: use whatever action the app declared,
+        // defaulting to SEND if nothing was set
+        return when (imeAction) {
             EditorInfo.IME_ACTION_SEARCH,
             EditorInfo.IME_ACTION_GO,
-            EditorInfo.IME_ACTION_SEND,
             EditorInfo.IME_ACTION_NEXT,
-            EditorInfo.IME_ACTION_DONE -> {
-                ic.performEditorAction(imeAction)
+            EditorInfo.IME_ACTION_DONE,
+            EditorInfo.IME_ACTION_SEND -> imeAction
+            else -> EditorInfo.IME_ACTION_SEND
+        }
+    }
+
+    /**
+     * Attempts to commit newline or action text directly via commitText.
+     * This is the most reliable method for WebViews, React Native, Flutter,
+     * and custom EditText fields that don't handle performEditorAction well.
+     */
+    private fun commitTextFallback(editorInfo: EditorInfo, action: Int): Boolean {
+        val ic = currentInputConnection ?: return false
+
+        return when (action) {
+            IME_ACTION_NEWLINE_FALLBACK -> {
+                // Commit a literal newline character
+                val inputType = editorInfo.inputType
+                if ((inputType and EditorInfo.TYPE_MASK_CLASS) == EditorInfo.TYPE_NULL) {
+                    // Non-text field: can't commit text, try key event
+                    false
+                } else {
+                    ic.commitText("\n", 1)
+                }
+            }
+            EditorInfo.IME_ACTION_SEND -> {
+                // For single-line send fields, commit text doesn't make sense.
+                // Only try for non-text types.
+                val inputType = editorInfo.inputType
+                if ((inputType and EditorInfo.TYPE_MASK_CLASS) == EditorInfo.TYPE_NULL) {
+                    ic.commitText("\n", 1)
+                } else {
+                    false
+                }
             }
             else -> {
+                // For SEARCH, GO, NEXT, DONE — try commitText with a newline
+                // Some apps (especially WebViews) handle this better than performEditorAction
                 ic.commitText("\n", 1)
             }
         }
-        updateSuggestions()
+    }
+
+    private fun insertNewline() {
+        val ic = currentInputConnection ?: return
+        val editorInfo = currentInputEditorInfo
+        val inputType = editorInfo?.inputType ?: 0
+
+        if ((inputType and EditorInfo.TYPE_MASK_CLASS) == EditorInfo.TYPE_NULL) {
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+            return
+        }
+
+        // Try \n first (most common)
+        val success = ic.commitText("\n", 1)
+        if (success) return
+
+        // Fallback 1: try \r\n for apps that expect CR+LF (some editors, terminals)
+        val success2 = ic.commitText("\r\n", 1)
+        if (success2) return
+
+        // Fallback 2: raw key event
+        sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
     }
 
     private fun performKeyHaptic() {
@@ -1217,7 +2161,7 @@ class KVIEInputMethodService : InputMethodService() {
                     return
                 }
                 SmolLMEngine.VoiceCommandType.NEW_LINE -> {
-                    ic.commitText("\n", 1)
+                    insertNewline()
                     updateSuggestions()
                     return
                 }
@@ -1243,6 +2187,21 @@ class KVIEInputMethodService : InputMethodService() {
         val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
         ic.commitText(prefix + cleanText + " ", 1)
         SessionManager.recordSession(this, cleanText, targetApp)
+
+        // Track voice dictation for Contextual Bandit self-learning
+        val dictatedWords = cleanText.split(Regex("[^\\p{L}\\p{Nd}]+")).filter { it.isNotBlank() }
+        lastDictatedWords = dictatedWords
+        pendingVoiceValidationJob?.cancel()
+        pendingVoiceValidationJob = scope.launch {
+            delay(4500)
+            if (lastDictatedWords.isNotEmpty()) {
+                ContextualBanditEngine.rewardVoiceSentenceAccepted(
+                    lastDictatedWords,
+                    if (::userLexiconDb.isInitialized) userLexiconDb else null
+                )
+            }
+        }
+
         updateSuggestions()
 
         scope.launch {
@@ -1276,8 +2235,10 @@ class KVIEInputMethodService : InputMethodService() {
         qwertyContainer.visibility = View.VISIBLE
         statusText.visibility = View.GONE
         suggestionBar.visibility = View.VISIBLE
+        applyAccentTheme()
         populateKeys()
         updateSuggestions()
+        updateEnterKeyActionVisual()
     }
 
     private fun adaptAppTone(packageName: String) {
@@ -1294,11 +2255,11 @@ class KVIEInputMethodService : InputMethodService() {
             packageName.contains("linkedin", ignoreCase = true) ||
             packageName.contains("slack", ignoreCase = true) ||
             packageName.contains("teams", ignoreCase = true) -> {
-                chipToneFormal.setTextColor(0xFF00E5FF.toInt())
+                chipToneFormal.setTextColor(currentAccentColor)
                 chipToneCasual.setTextColor(0xFF8E8E9E.toInt())
             }
             else -> {
-                chipToneFormal.setTextColor(0xFF00E5FF.toInt())
+                chipToneFormal.setTextColor(currentAccentColor)
                 chipToneCasual.setTextColor(0xFFD7FB52.toInt())
             }
         }
@@ -1323,6 +2284,7 @@ class KVIEInputMethodService : InputMethodService() {
     companion object {
         var instance: KVIEInputMethodService? = null
         var lastActivePackageName: String? = null
+        private const val IME_ACTION_NEWLINE_FALLBACK = -1
 
         fun commitFromExternal(text: String): Boolean {
             return instance?.directCommitText(text) ?: false

@@ -12,9 +12,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
@@ -24,14 +21,19 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Floating Voice Mic Bubble Service.
- * Hovers over any application on Android (WhatsApp, Notes, Chrome, etc.).
+ *
+ * Architecture:
+ * - Uses WhisperEngine (Silero VAD + HTTP Whisper backend) instead of Google SpeechRecognizer
+ * - Streams partial transcription results in real-time
+ * - Direct injection into active app via IME or Accessibility Service
  *
  * Gestures:
  * 1. Single Tap: Start / Stop Voice Dictation with on-device SmolLM2 refinement.
@@ -43,17 +45,25 @@ class FloatingMicService : Service() {
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
     private var trashView: View? = null
-
     private var bubbleContainer: FrameLayout? = null
-    private var bubbleGlow: View? = null
     private var bubbleMicIcon: ImageView? = null
+    private var statusLabel: TextView? = null
 
-    private var speechRecognizer: SpeechRecognizer? = null
+    private var whisperEngine: WhisperEngine? = null
     private var isListening = false
-    private val scope = CoroutineScope(Dispatchers.Main)
-
+    private var currentPartial = ""
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var isLongPressed = false
+    private val isProcessing = AtomicBoolean(false)
+
+    // Backend URLs to try (same as AutoEditClient)
+    private val backendUrls = listOf(
+        "http://127.0.0.1:8765",
+        "http://10.0.2.2:8765",
+        "http://192.168.1.3:8765"
+    )
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,7 +72,6 @@ class FloatingMicService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         AutoEditClient.init(this)
         createFloatingBubble()
-        initSpeechRecognizer()
     }
 
     @SuppressLint("ClickableViewAccessibility", "InflateParams")
@@ -74,6 +83,7 @@ class FloatingMicService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        // Main bubble params
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -87,21 +97,22 @@ class FloatingMicService : Service() {
         }
 
         val inflater = LayoutInflater.from(this)
-        floatingView = inflater.inflate(R.layout.floating_mic_layout, null)
-        bubbleContainer = floatingView?.findViewById(R.id.bubbleContainer)
-        bubbleGlow = floatingView?.findViewById(R.id.bubbleGlow)
-        bubbleMicIcon = floatingView?.findViewById(R.id.bubbleMicIcon)
+        floatingView = inflater.inflate(R.layout.floating_mic_layout, null).apply {
+            bubbleContainer = findViewById(R.id.bubbleContainer)
+            bubbleGlow = findViewById(R.id.bubbleGlow)
+            bubbleMicIcon = findViewById(R.id.bubbleMicIcon)
+            statusLabel = findViewById(R.id.statusLabel)
+        }
 
-        // Setup Trash overlay at screen bottom
+        // Trash zone at bottom
         val trashParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM
-        }
+        ).apply { gravity = Gravity.BOTTOM }
+
         trashView = inflater.inflate(R.layout.floating_trash_target, null)
         windowManager?.addView(trashView, trashParams)
         windowManager?.addView(floatingView, params)
@@ -120,7 +131,6 @@ class FloatingMicService : Service() {
         val longPressRunnable = Runnable {
             isLongPressed = true
             floatingView?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            // Hold again: Open Keyboard
             openKeyboard()
         }
 
@@ -134,7 +144,6 @@ class FloatingMicService : Service() {
                     isDragging = false
                     isLongPressed = false
                     v.isPressed = true
-
                     longPressHandler.postDelayed(longPressRunnable, 600)
                     true
                 }
@@ -143,7 +152,7 @@ class FloatingMicService : Service() {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
 
-                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                    if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
                         isDragging = true
                         longPressHandler.removeCallbacks(longPressRunnable)
                         trashView?.visibility = View.VISIBLE
@@ -169,14 +178,14 @@ class FloatingMicService : Service() {
                     val displayMetrics = resources.displayMetrics
                     val screenHeight = displayMetrics.heightPixels
 
-                    // Check if dropped near bottom trash zone (dismiss)
+                    // Trash zone dismissal
                     if (isDragging && params.y > (screenHeight - 200)) {
                         Toast.makeText(this, "Floating mic closed", Toast.LENGTH_SHORT).show()
                         stopSelf()
                         return@setOnTouchListener true
                     }
 
-                    // Single Tap handling: tap always toggles mic cleanly
+                    // Single tap: toggle mic
                     if (!isDragging && !isLongPressed) {
                         v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         toggleListening()
@@ -197,153 +206,220 @@ class FloatingMicService : Service() {
         imm?.showInputMethodPicker()
     }
 
-    private fun initSpeechRecognizer() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
-        try {
-            speechRecognizer?.destroy()
-        } catch (_: Exception) {}
+    // ─── Whisper Engine Integration ──────────────────────────────────────────
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: android.os.Bundle?) {
-                    updateBubbleActiveState(true)
-                }
+    private fun getWhisperEngine(): WhisperEngine? {
+        if (whisperEngine == null) {
+            // Try to find the working backend URL
+            val workingUrl = backendUrls.firstOrNull { checkBackend(it) } ?: backendUrls[0]
+            whisperEngine = WhisperEngine(this).configure(
+                backendUrl = workingUrl,
+                silenceTimeoutMs = 1200,
+                minSpeechMs = 250,
+                vadThreshold = 0.5f
+            )
+        }
+        return whisperEngine
+    }
 
-                override fun onBeginningOfSpeech() {
-                    updateBubbleActiveState(true)
-                }
-
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-
-                override fun onEndOfSpeech() {
-                    updateBubbleActiveState(false)
-                }
-
-                override fun onResults(results: android.os.Bundle?) {
-                    stopListening()
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val transcript = matches?.firstOrNull().orEmpty()
-                    handleFinalTranscript(transcript)
-                }
-
-                override fun onError(error: Int) {
-                    stopListening()
-                }
-
-                override fun onPartialResults(partialResults: android.os.Bundle?) {}
-                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-            })
+    private fun checkBackend(url: String): Boolean {
+        return try {
+            val conn = java.net.URL("$url/health").openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 500
+            conn.readTimeout = 500
+            conn.responseCode == 200
+        } catch (_: Exception) {
+            false
         }
     }
 
-    private fun destroySpeechRecognizer() {
+    private fun toggleListening() {
+        if (isProcessing.get() && !isListening) {
+            Toast.makeText(this, "Still processing previous result...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (isListening) {
+            stopListening()
+        } else {
+            startListening()
+        }
+    }
+
+    private fun startListening() {
+        if (isListening) return
+
+        val engine = getWhisperEngine() ?: run {
+            Toast.makeText(this, "Whisper engine not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        isListening = true
+        currentPartial = ""
+        updateBubbleActiveState(true)
+        showStatus("Listening...")
+
+        scope.launch {
+            engine.startTranscription(
+                onPartial = { partial ->
+                    currentPartial = partial
+                    showStatus("Hearing: ${partial.take(40)}${if (partial.length > 40) "..." else ""}")
+                },
+                onFinal = { text ->
+                    handleFinalTranscript(text)
+                },
+                onError = { error ->
+                    Log.e("FloatingMic", "Transcription error: $error")
+                    showStatus("Error: $error")
+                    resetListeningState()
+                }
+            )
+        }
+    }
+
+    private fun stopListening() {
+        val engine = whisperEngine
+        if (engine != null && isListening) {
+            scope.launch {
+                try {
+                    val finalText = engine.stopTranscription()
+                    if (finalText.isNotBlank() && finalText != currentPartial) {
+                        handleFinalTranscript(finalText)
+                    } else if (currentPartial.isNotBlank()) {
+                        handleFinalTranscript(currentPartial)
+                    }
+                } catch (e: Exception) {
+                    Log.e("FloatingMic", "Stop error: ${e.message}")
+                }
+                resetListeningState()
+            }
+        } else {
+            resetListeningState()
+        }
+    }
+
+    private fun resetListeningState() {
+        isListening = false
+        currentPartial = ""
+        updateBubbleActiveState(false)
+        showStatus("")
+    }
+
+    // ─── Transcript Handling ─────────────────────────────────────────────────
+
+    private fun handleFinalTranscript(raw: String) {
+        if (raw.isBlank()) {
+            resetListeningState()
+            return
+        }
+
+        isProcessing.set(true)
+        resetListeningState()
+        showStatus("Polishing...")
+
+        scope.launch {
+            try {
+                val stripped = SmolLMEngine.stripFillersAndPunctuate(raw)
+
+                if (stripped.isBlank()) {
+                    isProcessing.set(false)
+                    showStatus("")
+                    return@launch
+                }
+
+                // Try direct injection via IME first
+                var typed = KVIEInputMethodService.commitFromExternal(stripped)
+
+                // Fall back to Accessibility injection
+                if (!typed) {
+                    typed = KVIEAccessibilityService.typeText(stripped)
+                }
+
+                val targetApp = KVIEAccessibilityService.getActiveAppName(this@FloatingMicService)
+                SessionManager.recordSession(this@FloatingMicService, stripped, targetApp)
+
+                // If neither injection worked, copy to clipboard and guide user
+                if (!typed) {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("KVIE Voice", stripped))
+
+                    if (!KVIEAccessibilityService.isAvailable) {
+                        Toast.makeText(
+                            this@FloatingMicService,
+                            "Turn ON 'KVIE Realtime Typing' in Accessibility Settings",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        try {
+                            startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            })
+                        } catch (_: Exception) {}
+                    } else {
+                        Toast.makeText(this@FloatingMicService, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                // Feed to Contextual Bandit for learning
+                val words = stripped.split(Regex("[^\\p{L}\\p{Nd}]+")).filter { it.isNotBlank() }
+                if (words.isNotEmpty()) {
+                    scope.launch {
+                        val db = UserLexiconDatabase.getInstance(this@FloatingMicService)
+                        words.forEach { db.recordWordTyped(it) }
+                        delay(100)
+                        ContextualBanditEngine.rewardVoiceSentenceAccepted(words, db)
+                    }
+                }
+
+                // AI polish
+                val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
+                if (polished != stripped) {
+                    SessionManager.recordSession(this@FloatingMicService, polished, "$targetApp (AI Polish)")
+                    val updatedIme = KVIEInputMethodService.commitFromExternal(polished)
+                    if (!updatedIme) {
+                        KVIEAccessibilityService.typeText(polished)
+                    }
+                }
+
+                showStatus("")
+            } catch (e: Exception) {
+                Log.e("FloatingMic", "Handle transcript error: ${e.message}")
+                showStatus("")
+            } finally {
+                isProcessing.set(false)
+            }
+        }
+    }
+
+    // ─── UI Updates ──────────────────────────────────────────────────────────
+
+    private fun updateBubbleActiveState(active: Boolean) {
+        Handler(Looper.getMainLooper()).post {
+            bubbleContainer?.isSelected = active
+            val prefs = getSharedPreferences("kvie_prefs", Context.MODE_PRIVATE)
+            val accentHex = prefs.getString("accent_color", "#22d3ee") ?: "#22d3ee"
+            val accentColor = try { android.graphics.Color.parseColor(accentHex) }
+            catch (_: Exception) { 0xFF22D3EE.toInt() }
+            bubbleMicIcon?.setColorFilter(if (active) accentColor else 0xFFFFFFFF.toInt())
+        }
+    }
+
+    private fun showStatus(text: String) {
+        Handler(Looper.getMainLooper()).post {
+            statusLabel?.text = text
+            statusLabel?.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
+        }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        mainScope.cancel()
+        whisperEngine?.release()
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
             speechRecognizer?.destroy()
         } catch (_: Exception) {}
         speechRecognizer = null
-    }
-
-    private fun toggleListening() {
-        if (isListening) stopListening() else startListening()
-    }
-
-    private fun startListening() {
-        destroySpeechRecognizer()
-        initSpeechRecognizer()
-
-        if (speechRecognizer == null) {
-            isListening = false
-            updateBubbleActiveState(false)
-            return
-        }
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra("android.speech.extra.DICTATION_MODE", true)
-        }
-
-        try {
-            isListening = true
-            updateBubbleActiveState(true)
-            speechRecognizer?.startListening(intent)
-        } catch (_: Exception) {
-            stopListening()
-        }
-    }
-
-    private fun stopListening() {
-        isListening = false
-        updateBubbleActiveState(false)
-        destroySpeechRecognizer()
-    }
-
-    private fun updateBubbleActiveState(active: Boolean) {
-        Handler(Looper.getMainLooper()).post {
-            bubbleContainer?.isSelected = active
-            bubbleGlow?.visibility = if (active) View.VISIBLE else View.GONE
-            bubbleMicIcon?.setColorFilter(if (active) 0xFF00E5FF.toInt() else 0xFFFFFFFF.toInt())
-        }
-    }
-
-    private fun handleFinalTranscript(raw: String) {
-        if (raw.isBlank()) return
-
-        val stripped = SmolLMEngine.stripFillersAndPunctuate(raw)
-        if (stripped.isBlank()) return
-
-        // 1. Try Direct IME commit (if KVIE keyboard is currently open)
-        var typed = KVIEInputMethodService.commitFromExternal(stripped)
-
-        // 2. Try Direct Accessibility node injection (works across all apps: WhatsApp, Chrome, Telegram, etc.)
-        if (!typed) {
-            typed = KVIEAccessibilityService.typeText(stripped)
-        }
-
-        val targetApp = KVIEAccessibilityService.getActiveAppName(this)
-        SessionManager.recordSession(this, stripped, targetApp)
-
-        // 3. If neither typed because Accessibility is not enabled yet, copy & guide user
-        if (!typed) {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val clip = ClipData.newPlainText("KVIE Voice", stripped)
-            clipboard?.setPrimaryClip(clip)
-
-            if (!KVIEAccessibilityService.isAvailable) {
-                Toast.makeText(this, "🎙️ Copied! Turn ON 'KVIE Realtime Typing' in Accessibility to type directly", Toast.LENGTH_LONG).show()
-                try {
-                    val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
-                } catch (_: Exception) {}
-            } else {
-                Toast.makeText(this, "🎙️ Copied: \"$stripped\"", Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            Toast.makeText(this, "🎙️ Typed directly into field", Toast.LENGTH_SHORT).show()
-        }
-
-        scope.launch {
-            val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
-            if (polished != stripped) {
-                SessionManager.recordSession(this@FloatingMicService, polished, "$targetApp (AI Polish)")
-                val updatedIme = KVIEInputMethodService.commitFromExternal(polished)
-                if (!updatedIme) {
-                    KVIEAccessibilityService.typeText(polished)
-                }
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        stopListening()
-        speechRecognizer?.destroy()
         if (floatingView != null) {
             windowManager?.removeView(floatingView)
             floatingView = null

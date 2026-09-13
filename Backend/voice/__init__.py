@@ -4,7 +4,6 @@ Voice Module - Modern Voice System for Kritix AI
 Components:
 - STT: Whisper-based speech-to-text
 - TTS: Chatterbox multilingual text-to-speech
-- WakeWord: Simple energy-based wake word detection
 - VoiceManager: Orchestrates all voice components
 - VoiceLearner: Learns from corrections to improve accuracy
 """
@@ -39,12 +38,6 @@ from .TTS import (
     TTSConfig,
     Emotion,
 )
-from .WakeWord import (
-    WakeWordDetector,
-    acquire_stream_lock,
-    release_stream_lock,
-    get_active_detector,
-)
 from .VoiceManager import (
     VoiceManager,
     VoiceState,
@@ -76,11 +69,6 @@ __all__ = [
     "is_speaking",
     "TTSConfig",
     "Emotion",
-    # Wake Word
-    "WakeWordDetector",
-    "acquire_stream_lock",
-    "release_stream_lock",
-    "get_active_detector",
     # Voice Manager
     "VoiceManager",
     "VoiceState",

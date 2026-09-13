@@ -1,30 +1,28 @@
 import unittest
 
-from Backend.voice.WakeWord import _open_input_stream
+from Backend.voice.DSP import DSPPipeline
 
 
-class DummyPyAudio:
-    def __init__(self):
-        self.calls = []
-        self.stream = object()
+class AudioProcessingFallbackTests(unittest.TestCase):
+    """DSP pipeline can process audio without PyAudio dependencies."""
 
-    def open(self, **kwargs):
-        self.calls.append(kwargs)
-        if kwargs['channels'] == 1:
-            raise ValueError('Invalid number of channels')
-        return self.stream
+    def test_process_pcm_to_float(self):
+        pipeline = DSPPipeline(input_rate=44100, target_rate=16000)
+        # Generate a simple int16 sine wave (440 Hz)
+        import struct
+        import math
+        samples = [int(32767 * math.sin(2 * math.pi * 440 * i / 44100))
+                   for i in range]
+        pcm = struct.pack('<' + 'h' * len(samples), *samples)
+        result = pipeline.process(pcm)
+        self.assertEqual(result.dtype.name, 'float32')
+        self.assertGreater(len(result), 0)
 
-
-class OpenInputStreamTests(unittest.TestCase):
-    def test_falls_back_to_second_channel_count(self):
-        p = DummyPyAudio()
-
-        stream = _open_input_stream(p, sample_rate=16000, frames_per_buffer=1024, device_index=3)
-
-        self.assertIs(stream, p.stream)
-        self.assertEqual(len(p.calls), 2)
-        self.assertEqual(p.calls[0]['channels'], 1)
-        self.assertEqual(p.calls[1]['channels'], 2)
+    def test_noise_gate_suppresses_silence(self):
+        pipeline = DSPPipeline(input_rate=16000, target_rate=16000, noise_gate_db=-60.0)
+        silence = b'\x00' * 3200  # 100ms of silence
+        result = pipeline.process(silence)
+        self.assertTrue(all(abs(v) < 1e-4 for v in result))
 
 
 if __name__ == '__main__':

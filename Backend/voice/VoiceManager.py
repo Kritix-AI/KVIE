@@ -1,23 +1,19 @@
 """
 Voice/VoiceManager.py - Voice System Orchestrator
-Ties together STT, TTS, and Wake Word Detection
+Ties together STT and TTS components.
 """
 
 import os
-import sys
 import time
 import threading
 import queue
 from typing import Optional, Callable, Dict, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-
-# ── State Machine ──────────────────────────────────────────────────────────────
 
 class VoiceState:
     """Voice system state machine"""
     IDLE = "idle"
-    WAKE_WORD_DETECTED = "wake"
     LISTENING = "listening"
     PROCESSING = "processing"
     SPEAKING = "speaking"
@@ -27,8 +23,6 @@ class VoiceState:
 @dataclass
 class VoiceConfig:
     """Configuration for voice system"""
-    wake_words: list = field(default_factory=lambda: ["hey kritix", "hello kritix"])
-    wake_word_enabled: bool = True
     command_timeout: float = 10.0
     silence_duration: float = 1.5
     echo_buffer_ms: float = 150
@@ -40,14 +34,7 @@ class VoiceConfig:
         """Load from environment"""
         from dotenv import dotenv_values
         env = dotenv_values(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
-
-        wake_words_raw = env.get("WakeWords", "hey kritix,hello kritix,listen kritix")
-        wake_words = [w.strip() for w in wake_words_raw.split(",") if w.strip()]
-
-        return cls(
-            wake_words=wake_words,
-            wake_word_enabled=env.get("WakeWordEnabled", "True").lower() == "true",
-        )
+        return cls()
 
 
 # ── Voice Manager ──────────────────────────────────────────────────────────────
@@ -68,7 +55,6 @@ class VoiceManager:
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
-        self._wake_detector = None
         self._stt_module = None
         self._tts_module = None
 
@@ -80,7 +66,6 @@ class VoiceManager:
         )
         os.makedirs(self._data_dir, exist_ok=True)
 
-        print(f"[VOICE] Wake words: {self.config.wake_words}", flush=True)
         print(f"[VOICE] Echo buffer: {self.config.echo_buffer_ms}ms", flush=True)
 
     @property
@@ -120,18 +105,6 @@ class VoiceManager:
                 print(f"[VOICE] TTS import error: {e}", flush=True)
         return self._tts_module
 
-    def _get_wake_detector(self):
-        if self._wake_detector is None:
-            try:
-                from Backend.voice.WakeWord import WakeWordDetector
-                self._wake_detector = WakeWordDetector(
-                    callback=self._on_wake_word,
-                )
-                print("[VOICE] Wake word detector loaded", flush=True)
-            except ImportError as e:
-                print(f"[VOICE] WakeWord import error: {e}", flush=True)
-        return self._wake_detector
-
     # ── Status Updates ─────────────────────────────────────────────────────────
 
     def _update_status(self):
@@ -156,45 +129,18 @@ class VoiceManager:
         self._running = True
         self.state = VoiceState.IDLE
 
-        if self.config.wake_word_enabled:
-            wake_detector = self._get_wake_detector()
-            if wake_detector:
-                wake_detector.start()
-
         print("[VOICE] Voice system started", flush=True)
 
     def stop(self):
         self._running = False
-
-        if self._wake_detector:
-            self._wake_detector.stop()
-
         self.state = VoiceState.IDLE
         print("[VOICE] Voice system stopped", flush=True)
 
     def pause(self):
-        if self._wake_detector:
-            self._wake_detector.pause()
         self.state = VoiceState.IDLE
 
     def resume(self):
-        if self._wake_detector:
-            self._wake_detector.resume()
         self.state = VoiceState.IDLE
-
-    # ── Wake Word Handler ──────────────────────────────────────────────────────
-
-    def _on_wake_word(self, command: str = ""):
-        print(f"[VOICE] Wake word detected!", flush=True)
-        # Wake word detected - trigger callback to start command listening
-        # Main execution will handle the actual command listening
-        self.state = VoiceState.LISTENING
-
-        if self.callback:
-            try:
-                self.callback(command)
-            except Exception as e:
-                print(f"[VOICE] Callback error: {e}", flush=True)
 
     # ── Command Processing ─────────────────────────────────────────────────────
 
@@ -305,7 +251,6 @@ class VoiceManager:
         return {
             "running": self._running,
             "state": self.state,
-            "wake_enabled": self.config.wake_word_enabled,
             "stt_ready": stt_status is not None,
             "tts_ready": tts_status is not None,
             "commands_pending": self._command_queue.qsize(),
@@ -335,8 +280,6 @@ if __name__ == "__main__":
 
     print("\n[START] Starting voice system...", flush=True)
     vm.start()
-
-    print("\n[READY] Say wake word or press Ctrl+C to stop", flush=True)
 
     try:
         while vm.is_running:

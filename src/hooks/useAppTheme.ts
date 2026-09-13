@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { setAndroidKeyboardAccentColor } from '../lib/androidKeyboard'
 
 export interface ThemePreset {
   id: string
@@ -51,6 +52,8 @@ export const useAppTheme = () => {
     document.documentElement.style.setProperty('--accent-color', color)
     document.documentElement.style.setProperty('--accent-glow', glowRgba)
     document.documentElement.style.setProperty('--accent-subtle', subtleRgba)
+
+    setAndroidKeyboardAccentColor(color)
   }
 
   useEffect(() => {
