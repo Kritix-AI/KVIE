@@ -7,9 +7,10 @@ import './styles/global.css'
 const isFloatingWindow = window.location.search.includes('window=floating') || window.location.hash === '#floating'
 
 if (isFloatingWindow) {
-  document.documentElement.classList.add('floating-window-mode')
+  const doc = window.document || document
+  doc.documentElement.classList.add('floating-window-mode')
   document.body.classList.add('floating-window-mode')
-  document.documentElement.style.background = 'transparent'
+  doc.documentElement.style.background = 'transparent'
   document.body.style.background = 'transparent'
 }
 

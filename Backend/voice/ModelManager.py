@@ -44,6 +44,15 @@ def get_active_model_id() -> str:
 
 def set_active_model_id(model_id: str) -> bool:
     """Set active model in .env and reset loaded Whisper instance."""
+    if not model_id or not isinstance(model_id, str):
+        return False
+
+    # Allow only known model aliases and well-formed HuggingFace repo IDs
+    import re as _re
+    safe_chars = _re.match(r'^[A-Za-z0-9_\-./]+$', model_id)
+    if not safe_chars:
+        return False
+
     try:
         from Backend.voice import STT
         STT._asr_model = None
@@ -313,3 +322,21 @@ def download_model_stream(
     finally:
         with _active_download_lock:
             _current_downloads.pop(model_id, None)
+
+
+# ── Auto-download default model on import ─────────────────────────────────────
+def auto_download_default_model() -> None:
+    """Best-effort auto-download of the default ASR model if not already cached."""
+    try:
+        default_id = get_active_model_id()
+        installed = get_installed_models()
+        if default_id in installed:
+            return
+        print(f"[ModelManager] Auto-downloading model: {default_id}", flush=True)
+        download_model_stream(default_id, lambda p: None)
+    except Exception as exc:
+        print(f"[ModelManager] Auto-download skipped: {exc}", flush=True)
+
+
+# Trigger on module import so the model is available by first record
+auto_download_default_model()

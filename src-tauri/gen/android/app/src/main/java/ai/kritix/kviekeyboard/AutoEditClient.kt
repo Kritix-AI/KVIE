@@ -17,7 +17,7 @@ object AutoEditClient {
     private val endpoints = listOf(
         "http://127.0.0.1:8765/api/autoedit",  // USB reverse proxy & on-device
         "http://10.0.2.2:8765/api/autoedit",   // Emulator host routing
-        "http://192.168.1.3:8765/api/autoedit" // Local Wi-Fi network host
+        "http://10.0.3.2:8765/api/autoedit"   // Genymotion emulator host routing
     )
 
     private val client = OkHttpClient.Builder()
@@ -31,8 +31,8 @@ object AutoEditClient {
         }
     }
 
-    suspend fun refine(text: String, context: Context? = null): String? = withContext(Dispatchers.IO) {
-        if (text.isBlank()) return@withContext null
+    suspend fun refine(text: String, context: Context? = null): String = withContext(Dispatchers.IO) {
+        if (text.isBlank()) return@withContext text
 
         if (context != null && smolLMEngine == null) {
             init(context)
@@ -60,6 +60,7 @@ object AutoEditClient {
         }
 
         // 2. On-Device Instant SmolLM2 Engine Execution
-        return@withContext smolLMEngine?.refineText(text)
+        val onDevice = smolLMEngine?.refineText(text, context = null)
+        return@withContext onDevice ?: text
     }
 }

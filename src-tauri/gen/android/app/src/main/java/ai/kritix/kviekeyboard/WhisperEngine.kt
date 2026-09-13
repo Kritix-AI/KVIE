@@ -28,7 +28,7 @@ class WhisperEngine(private val context: Context) {
     fun loadModel(modelId: String): Boolean {
         loadedModelId = modelId
         val modelFile = File(context.filesDir, "models/$modelId.bin")
-        return modelFile.exists() || true // Fallback architecture ready
+        return modelFile.exists()
     }
 
     suspend fun transcribeAudio(onPartial: (String) -> Unit): String = withContext(Dispatchers.IO) {

@@ -11,14 +11,42 @@ const HEALTH_URL = SERVICE_URL.replace(/^ws/, 'http').replace(/\/ws\/transcribe$
 const downsample = (input: Float32Array, inputRate: number, outputRate: number) => {
   if (inputRate === outputRate) return input
   const ratio = inputRate / outputRate
-  const outputLength = Math.round(input.length / ratio)
+  if (ratio > 1) {
+    // Anti-aliasing: low-pass filter at Nyquist of output rate, then decimate
+    const cutoff = Math.min(1 / ratio, 0.5)
+    const outputLength = Math.round(input.length / ratio)
+    const output = new Float32Array(outputLength)
+    // Simple 3-tap FIR low-pass (windowed sinc approximation)
+    const tapRadius = 2
+    const taps: number[] = []
+    for (let i = -tapRadius; i <= tapRadius; i++) {
+      const x = i
+      const w = 0.5 * (1 + Math.cos((Math.PI * x) / (tapRadius + 1))) // Hamming window
+      const sinc = x === 0 ? 1 : Math.sin(2 * Math.PI * cutoff * x) / (2 * Math.PI * cutoff * x)
+      taps.push(sinc * w)
+    }
+    const tapSum = taps.reduce((a, b) => a + b, 0)
+    const normalized = taps.map(t => t / tapSum)
+
+    for (let i = 0; i < outputLength; i++) {
+      const srcCenter = i * ratio
+      let total = 0
+      for (let j = -tapRadius; j <= tapRadius; j++) {
+        const srcIdx = Math.round(srcCenter + j)
+        if (srcIdx >= 0 && srcIdx < input.length) {
+          total += input[srcIdx] * normalized[j + tapRadius]
+        }
+      }
+      output[i] = total
+    }
+    return output
+  }
+  // Upsampling (shouldn't happen for mic → 16kHz)
+  const outputLength = Math.round(input.length * ratio)
   const output = new Float32Array(outputLength)
-  for (let index = 0; index < outputLength; index += 1) {
-    const start = Math.floor(index * ratio)
-    const end = Math.min(Math.floor((index + 1) * ratio), input.length)
-    let total = 0
-    for (let source = start; source < end; source += 1) total += input[source]
-    output[index] = total / Math.max(1, end - start)
+  for (let i = 0; i < outputLength; i++) {
+    const srcIdx = Math.floor(i / ratio)
+    output[i] = srcIdx < input.length ? input[srcIdx] : 0
   }
   return output
 }
@@ -59,36 +87,45 @@ export const useLocalStreamingVoice = () => {
 
   const startListening = useCallback(async () => {
     if (!isAvailable) return
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-      const socket = new WebSocket(SERVICE_URL)
-      socket.binaryType = 'arraybuffer'
-      socket.onmessage = message => {
-        const event = JSON.parse(message.data) as VoiceEvent
-        if (event.kind === 'partial') setState(current => ({ ...current, interimTranscript: mergeRollingText(finalTranscriptRef.current, event.text || ''), error: null }))
-        if (event.kind === 'final') {
-          const seg = (event.text || '').trim()
-          finalTranscriptRef.current = `${finalTranscriptRef.current} ${seg}`.trim()
-          setState(current => ({ ...current, transcript: finalTranscriptRef.current, latestSegment: seg, interimTranscript: '', error: null }))
+
+    const connect = async (retriesLeft = 3): Promise<void> => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+        const socket = new WebSocket(SERVICE_URL)
+        socket.binaryType = 'arraybuffer'
+        socket.onmessage = message => {
+          const event = JSON.parse(message.data) as VoiceEvent
+          if (event.kind === 'partial') setState(current => ({ ...current, interimTranscript: mergeRollingText(finalTranscriptRef.current, event.text || ''), error: null }))
+          if (event.kind === 'final') {
+            const seg = (event.text || '').trim()
+            finalTranscriptRef.current = `${finalTranscriptRef.current} ${seg}`.trim()
+            setState(current => ({ ...current, transcript: finalTranscriptRef.current, latestSegment: seg, interimTranscript: '', error: null }))
+          }
+          if (event.kind === 'error') setState(current => ({ ...current, error: event.error || 'Local transcription failed' }))
+          if (event.kind === 'document') setState(current => ({ ...current, documentText: event.text ?? current.documentText, action: event.action || '' }))
+          if (event.kind === 'flush-complete') { flushResolverRef.current?.(); flushResolverRef.current = null }
         }
-        if (event.kind === 'error') setState(current => ({ ...current, error: event.error || 'Local transcription failed' }))
-        if (event.kind === 'document') setState(current => ({ ...current, documentText: event.text ?? current.documentText, action: event.action || '' }))
-        if (event.kind === 'flush-complete') { flushResolverRef.current?.(); flushResolverRef.current = null }
+        await new Promise<void>((resolve, reject) => { socket.onopen = () => resolve(); socket.onerror = () => reject(new Error('KVIE transcription service is unavailable')) })
+        socket.send(JSON.stringify({ type: 'start', language: 'auto' }))
+        const context = new AudioContext()
+        const source = context.createMediaStreamSource(stream)
+        const processor = context.createScriptProcessor(1024, 1, 1)
+        processor.onaudioprocess = event => { if (socket.readyState === WebSocket.OPEN) socket.send(toPCM16(downsample(event.inputBuffer.getChannelData(0), context.sampleRate, 16000))) }
+        source.connect(processor)
+        processor.connect(context.destination)
+        streamRef.current = stream; socketRef.current = socket; contextRef.current = context; processorRef.current = processor
+        setState(current => ({ ...current, isListening: true, error: null }))
+      } catch (cause) {
+        if (retriesLeft > 0) {
+          await new Promise(r => setTimeout(r, 800))
+          return connect(retriesLeft - 1)
+        }
+        cleanup()
+        setState(current => ({ ...current, error: cause instanceof Error ? cause.message : String(cause), isListening: false }))
       }
-      await new Promise<void>((resolve, reject) => { socket.onopen = () => resolve(); socket.onerror = () => reject(new Error('KVIE transcription service is unavailable')) })
-      socket.send(JSON.stringify({ type: 'start', language: 'auto' }))
-      const context = new AudioContext()
-      const source = context.createMediaStreamSource(stream)
-      const processor = context.createScriptProcessor(1024, 1, 1)
-      processor.onaudioprocess = event => { if (socket.readyState === WebSocket.OPEN) socket.send(toPCM16(downsample(event.inputBuffer.getChannelData(0), context.sampleRate, 16000))) }
-      source.connect(processor)
-      processor.connect(context.destination)
-      streamRef.current = stream; socketRef.current = socket; contextRef.current = context; processorRef.current = processor
-      setState(current => ({ ...current, isListening: true, error: null }))
-    } catch (cause) {
-      cleanup()
-      setState(current => ({ ...current, error: cause instanceof Error ? cause.message : String(cause) }))
     }
+
+    await connect(3)
   }, [cleanup, isAvailable])
 
   const stopListening = useCallback(async () => {

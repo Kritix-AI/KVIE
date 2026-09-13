@@ -1,3 +1,5 @@
+const MAX_ERASE_CHUNK = 200
+
 /**
  * KVIE Smart Incremental Typing & Overlap Analysis Engine
  * 
@@ -218,7 +220,8 @@ export class IncrementalTypingSession {
       }
     }
 
-    const eraseCount = previousInterim.length - commonPrefixLen
+    const rawEraseCount = previousInterim.length - commonPrefixLen
+    const eraseCount = Math.max(0, Math.min(rawEraseCount, MAX_ERASE_CHUNK))
     const appendText = targetInterim.slice(commonPrefixLen)
 
     if (isFinal) {

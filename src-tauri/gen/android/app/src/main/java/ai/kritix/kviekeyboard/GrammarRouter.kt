@@ -118,8 +118,7 @@ object GrammarRouter {
     // ──────────────── Tier 2: Sentence Engine (Grammar, Structure & Tense) ────────────────
     object SentenceEngine {
         private val grammarRules = listOf(
-            Regex("(?i)\\b(a)\\s+([aeiou][a-z]+)\\b") to "an $2",
-            Regex("(?i)\\b(an)\\s+([bcdfghjklmnpqrstvwxyz][a-z]+)\\b") to "a $2",
+            // Prepositions
             Regex("(?i)\\binterested\\s+on\\b") to "interested in",
             Regex("(?i)\\bcongratulations\\s+for\\b") to "congratulations on",
             Regex("(?i)\\bdiscuss\\s+about\\b") to "discuss",
@@ -128,16 +127,52 @@ object GrammarRouter {
             Regex("(?i)\\bdepend\\s+of\\b") to "depend on"
         )
 
+        // Words that begin with consonants but take "an" due to vowel pronunciation
+        private val consonantButVowelSound = setOf("one", "unicorn", "university", "utility", "ewe", "eulogy", "hour", "honest", "honor", "heir", "honour")
+
+        fun processArticles(text: String): String {
+            return text.replace(Regex("\\b(a)\\s+([a-zA-Z])")) { match ->
+                val word = match.groupValues[2]
+                val lowerWord = word.lowercase()
+                val needsAn = lowerWord.startsWith("a") || lowerWord.startsWith("e") || lowerWord.startsWith("i") ||
+                    lowerWord.startsWith("o") || lowerWord.startsWith("u") ||
+                    consonantButVowelSound.contains(lowerWord)
+                if (needsAn) "an $word" else match.value
+            }
+        }
+
         fun process(text: String): String {
             if (text.isBlank()) return ""
 
             var result = text
 
+            // 1. Spoken contractions → standard English
+            result = result.replace(Regex("(?i)\\bgonna\\b"), "going to")
+            result = result.replace(Regex("(?i)\\bwanna\\b"), "want to")
+            result = result.replace(Regex("(?i)\\bkinda\\b"), "kind of")
+
+            // 2. Grammar rules
             for ((regex, repl) in grammarRules) {
                 result = regex.replace(result, repl)
             }
 
-            // Capitalize sentence boundaries
+            // 3. Article a/an with proper-phoneme awareness
+            result = processArticles(result)
+
+            // 4. Subject-verb agreement (singular third-person: he go -> he goes)
+            result = result.replace(Regex("(?i)\\b(he|she|it)\\s+(go|do|have|make|take|see|come|know|get|give|find|think|tell|say)\\b")) { match ->
+                val subject = match.groupValues[1]
+                val verb = match.groupValues[2].lowercase()
+                val conjugated = when (verb) {
+                    "go" -> "goes"
+                    "do" -> "does"
+                    "have" -> "has"
+                    else -> verb + "s"
+                }
+                "$subject $conjugated"
+            }
+
+            // 5. Capitalize sentence boundaries
             val sentences = result.split(Regex("(?<=[.!?\\n])\\s+")).map { sentence ->
                 val trimmed = sentence.trim()
                 if (trimmed.isEmpty()) "" else trimmed.replaceFirstChar { it.uppercase() }

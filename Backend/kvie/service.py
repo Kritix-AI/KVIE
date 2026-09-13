@@ -28,9 +28,18 @@ app = FastAPI(title="KVIE Local Streaming Service", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "tauri://localhost",
+        "app://localhost",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -200,6 +209,56 @@ async def transcribe_socket(websocket: WebSocket):
             await sender_task
         except asyncio.CancelledError:
             pass
+
+
+# ── Auto-Edit API ─────────────────────────────────────────────────────────────
+# Provides real-time grammar/punctuation correction for the Android keyboard
+# via the AutoEditClient (http://127.0.0.1:8765/api/autoedit)
+
+from pydantic import BaseModel
+
+class AutoEditRequest(BaseModel):
+    text: str
+
+class AutoEditResponse(BaseModel):
+    refined_text: str
+    original_text: str
+
+
+@app.post("/api/autoedit")
+async def auto_edit(req: AutoEditRequest):
+    """Refine transcribed text: fix grammar, punctuation, filler words."""
+    raw = (req.text or "").strip()
+    if not raw:
+        return JSONResponse({"refined_text": "", "original_text": req.text})
+
+    # Import here to avoid circular deps at module load time
+    try:
+        from Backend.kvie.grammar_router import GrammarRouter
+        refined = GrammarRouter.route(raw, strict=True)
+    except Exception:
+        refined = raw
+
+    # Also strip common filler words as a safety net
+    try:
+        import re
+        fillers = [
+            r'\b(um+|umm+|ummm+)\b',
+            r'\b(uh+|uhh+|ah+|ahh+|er+|err+)\b',
+            r'\b(basically|literally|actually)\b',
+            r'\b(you know|i mean|so yeah)\b',
+        ]
+        for pat in fillers:
+            refined = re.sub(pat, '', refined, flags=re.IGNORECASE)
+        refined = re.sub(r'\s+', ' ', refined).strip()
+        refined = re.sub(r'([.,!?;:])([a-zA-Z])', r'\1 \2', refined)
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "refined_text": refined if refined else raw,
+        "original_text": req.text,
+    })
 
 
 def run(host: str = "127.0.0.1", port: int = 8765) -> None:

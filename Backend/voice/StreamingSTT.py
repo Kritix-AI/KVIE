@@ -94,6 +94,7 @@ class StreamingSTT:
         self._silence_count = 0
         self._worker: Optional[threading.Thread] = None
         self._running = False
+        self._lock = threading.Lock()
         self._state_lock = threading.Lock()
 
     @staticmethod
@@ -127,6 +128,7 @@ class StreamingSTT:
             worker.join(timeout=timeout)
         with self._state_lock:
             self._running = False
+        self._lock = threading.Lock()
         self._emit("stopped")
 
     def push_pcm(self, pcm: bytes) -> None:

@@ -47,6 +47,54 @@ export const FloatingWindowApp: React.FC = () => {
   const typingSessionRef = useRef<IncrementalTypingSession>(new IncrementalTypingSession())
   const lastFinalTranscriptRef = useRef('')
 
+  // ── Serialized injection queue to prevent race conditions ──────────────────
+  const injectionQueueRef = useRef<Array<() => Promise<void>>>([])
+  const isInjectingRef = useRef(false)
+  const injectAbortRef = useRef(false)
+
+  const drainInjectionQueue = useCallback(async () => {
+    if (isInjectingRef.current) return
+    isInjectingRef.current = true
+    injectAbortRef.current = false
+
+    while (injectionQueueRef.current.length > 0) {
+      if (injectAbortRef.current) break
+      const task = injectionQueueRef.current.shift()!
+      try {
+        await task()
+      } catch {
+        // individual injection failure — continue with next queued item
+      }
+    }
+    isInjectingRef.current = false
+  }, [])
+
+  // Helper: queue an injection so they execute strictly in order
+  const queueInjection = useCallback(async (eraseCount: number, appendText: string, message?: string) => {
+    return new Promise<void>((resolve, reject) => {
+      injectionQueueRef.current.push(async () => {
+        if (injectAbortRef.current) { resolve(); return }
+        try {
+          await tauriBridge.eraseAndInject(eraseCount, appendText)
+          if (message) setInjectionMessage(message)
+          resolve()
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)))
+        }
+      })
+      void drainInjectionQueue()
+    })
+  }, [drainInjectionQueue])
+
+  // Cancel all pending injections (called when recording stops)
+  const cancelPendingInjections = useCallback(() => {
+    injectAbortRef.current = true
+    injectionQueueRef.current = []
+    isInjectingRef.current = false
+  }, [])
+
+  // ── End serialized injection queue ─────────────────────────────────────────
+
   useEffect(() => {
     document.body.classList.add('floating-window-mode')
     document.documentElement.classList.add('floating-window-mode')
@@ -89,6 +137,7 @@ export const FloatingWindowApp: React.FC = () => {
   }, [speech.isListening, browserSpeech, localVoice])
 
   const clearAll = () => {
+    cancelPendingInjections()
     const fullText = typingSessionRef.current.getFullText()
     if (fullText) {
       void saveVoiceSession(fullText)
@@ -153,6 +202,8 @@ export const FloatingWindowApp: React.FC = () => {
 
     let isCancelled = false
 
+    const markCancelled = () => { isCancelled = true }
+
     // Case 1: Final segment arrived (e.g. after a pause)
     if (currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
       let newFinalPortion = currentFinal
@@ -166,41 +217,41 @@ export const FloatingWindowApp: React.FC = () => {
 
       if (newFinalPortion) {
         void (async () => {
-          // Process through Custom Dictionary -> Snippets -> Translation
-          const processedFinal = await processSpokenVoiceText(newFinalPortion, {
-            applyTranslation: isTranslationEnabled,
-            targetLanguage,
-          })
-          if (isCancelled) return
+          try {
+            const processedFinal = await processSpokenVoiceText(newFinalPortion, {
+              applyTranslation: isTranslationEnabled,
+              targetLanguage,
+            })
+            if (isCancelled) return
 
-          const delta = session.processSegment(processedFinal, true)
-          if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-            await tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText)
-            setInjectionMessage(isTranslationEnabled ? 'Translated & typed' : 'Typed & saved')
+            const delta = session.processSegment(processedFinal, true)
+            if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+              await queueInjection(delta.eraseCount, delta.appendText, isTranslationEnabled ? 'Translated & typed' : 'Typed & saved')
+            }
+          } catch (err) {
+            if (!isCancelled) setInjectionMessage(err instanceof Error ? err.message : String(err))
           }
-        })().catch(err => {
-          setInjectionMessage(err instanceof Error ? err.message : String(err))
-        })
+        })()
       }
-      return () => { isCancelled = true }
+      return markCancelled
     }
 
-    // Case 2: Active Interim speech clause while speaking
+    // Case 2: Active Interim speech clause while speaking — synchronous only
     if (currentInterim) {
-      // Instant synchronous dictionary correction & snippet expansion on interim preview
-      const quickInterim = applyCustomDictionary(expandVoiceSnippets(currentInterim).expandedText)
-      const delta = session.processSegment(quickInterim, false)
-      if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-        void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
-          setInjectionMessage('Typing...')
-        }).catch(err => {
-          setInjectionMessage(err instanceof Error ? err.message : String(err))
-        })
+      try {
+        const quickInterim = applyCustomDictionary(expandVoiceSnippets(currentInterim).expandedText)
+        const delta = session.processSegment(quickInterim, false)
+        if (delta.eraseCount > 0 || delta.appendText.length > 0) {
+          // Don't await — queue it so it doesn't block interim updates
+          void queueInjection(delta.eraseCount, delta.appendText, 'Typing...')
+        }
+      } catch {
+        // non-fatal interim processing error
       }
     }
 
-    return () => { isCancelled = true }
-  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode, isTranslationEnabled, targetLanguage])
+    return markCancelled
+  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode, isTranslationEnabled, targetLanguage, queueInjection])
 
 
   const handleToggleListening = () => {

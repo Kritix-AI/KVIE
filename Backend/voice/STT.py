@@ -15,12 +15,17 @@ Public API:
     get_model() -> WhisperModel | None
 """
 
+import logging
 import os
 import re
 import sys
 import threading
 from typing import Optional, Tuple
 from dataclasses import dataclass
+
+import numpy as np
+
+logger = logging.getLogger(__name__)
 
 if sys.platform == "win32":
     import codecs
@@ -72,56 +77,57 @@ _stt_lock  = threading.Lock()
 
 def get_model(config: Optional[STTConfig] = None):
     global _asr_model, _asr_engine_type
-    if _asr_model is not None:
-        return _asr_model
+    with _stt_lock:
+        if _asr_model is not None:
+            return _asr_model
 
-    cfg = config or STTConfig.from_env()
-    print(f"[STT] Loading Whisper model: {cfg.model_name} on {cfg.device}", flush=True)
+        cfg = config or STTConfig.from_env()
+        print(f"[STT] Loading Whisper model: {cfg.model_name} on {cfg.device}", flush=True)
 
-    # 1. Try faster-whisper CTranslate2 Engine (Ultra Fast)
-    try:
-        from faster_whisper import WhisperModel
-        from dotenv import dotenv_values
-        env = dotenv_values(os.path.join(_ROOT, ".env"))
-        compute_type = env.get("WhisperComputeType") or ("float16" if cfg.device == "cuda" else "int8")
-        
-        from Backend.voice.ModelManager import MODEL_REPO_MAP
-        raw_name = cfg.model_name
-        target_model = MODEL_REPO_MAP.get(raw_name, raw_name)
-
+        # 1. Try faster-whisper CTranslate2 Engine (Ultra Fast)
         try:
-            _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
-        except Exception:
-            if target_model in ["large-v3-turbo", "turbo", "large-v3-turbo-ct2"]:
-                target_model = "deepdml/faster-whisper-large-v3-turbo-ct2"
+            from faster_whisper import WhisperModel
+            from dotenv import dotenv_values
+            env = dotenv_values(os.path.join(_ROOT, ".env"))
+            compute_type = env.get("WhisperComputeType") or ("float16" if cfg.device == "cuda" else "int8")
+
+            from Backend.voice.ModelManager import MODEL_REPO_MAP
+            raw_name = cfg.model_name
+            target_model = MODEL_REPO_MAP.get(raw_name, raw_name)
+
+            try:
                 _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
-            else:
-                _asr_model = WhisperModel(raw_name, device=cfg.device, compute_type=compute_type)
+            except Exception:
+                if target_model in ["large-v3-turbo", "turbo", "large-v3-turbo-ct2"]:
+                    target_model = "deepdml/faster-whisper-large-v3-turbo-ct2"
+                    _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
+                else:
+                    _asr_model = WhisperModel(raw_name, device=cfg.device, compute_type=compute_type)
 
-        _asr_engine_type = "faster_whisper"
-        print(f"[STT] Loaded faster-whisper CTranslate2 model ({target_model}, compute_type={compute_type})", flush=True)
-        return _asr_model
-    except Exception as e:
-        print(f"[STT] faster-whisper load notice: {e}", flush=True)
+            _asr_engine_type = "faster_whisper"
+            print(f"[STT] Loaded faster-whisper CTranslate2 model ({target_model}, compute_type={compute_type})", flush=True)
+            return _asr_model
+        except Exception as e:
+            print(f"[STT] faster-whisper load notice: {e}", flush=True)
 
-    # 2. Fallback to OpenAI PyTorch Whisper (openai-whisper)
-    try:
-        import whisper
+        # 2. Fallback to OpenAI PyTorch Whisper (openai-whisper)
         try:
-            _asr_model = whisper.load_model(cfg.model_name, device=cfg.device)
-        except Exception as device_err:
-            if cfg.device != "cpu":
-                print(f"[STT] whisper load on {cfg.device} notice: {device_err}. Falling back to CPU...", flush=True)
-                _asr_model = whisper.load_model(cfg.model_name, device="cpu")
-            else:
-                raise device_err
-        _asr_engine_type = "openai_whisper"
-        print(f"[STT] Loaded openai-whisper (PyTorch) model ({cfg.model_name})", flush=True)
-        return _asr_model
-    except Exception as e:
-        print(f"[STT] openai-whisper load notice: {e}", flush=True)
+            import whisper
+            try:
+                _asr_model = whisper.load_model(cfg.model_name, device=cfg.device)
+            except Exception as device_err:
+                if cfg.device != "cpu":
+                    print(f"[STT] whisper load on {cfg.device} notice: {device_err}. Falling back to CPU...", flush=True)
+                    _asr_model = whisper.load_model(cfg.model_name, device="cpu")
+                else:
+                    raise device_err
+            _asr_engine_type = "openai_whisper"
+            print(f"[STT] Loaded openai-whisper (PyTorch) model ({cfg.model_name})", flush=True)
+            return _asr_model
+        except Exception as e:
+            print(f"[STT] openai-whisper load notice: {e}", flush=True)
 
-    return None
+        return None
 
 
 def is_loaded() -> bool:
@@ -178,8 +184,8 @@ def _vad_filter(audio_float32, sr: int = 16000):
         import torch
         get_speech_timestamps = _vad_utils[0]
 
-        # Silero VAD requires torch tensor
-        audio_tensor = torch.from_numpy(audio_float32).float()
+        # Silero VAD requires torch tensor; clone to break numpy memory aliasing
+        audio_tensor = torch.from_numpy(audio_float32).float().clone()
         if audio_tensor.ndim > 1:
             audio_tensor = audio_tensor.mean(dim=0)
 
@@ -204,7 +210,6 @@ def _vad_filter(audio_float32, sr: int = 16000):
             end = min(len(audio_float32), ts['end'] + pad_samples)
             segments.append(audio_float32[start:end])
 
-        import numpy as np
         speech_only = np.concatenate(segments)
         ratio = len(speech_only) / max(len(audio_float32), 1)
         print(f"[STT] VAD: Extracted {len(speech_timestamps)} speech segments "
@@ -266,8 +271,8 @@ def _save_language(lang: str):
     try:
         with open(os.path.join(_DATA_DIR, "Language.data"), "w", encoding="utf-8") as f:
             f.write(lang)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("[STT] Failed to save language: %s", exc)
 
 
 # ── Text Post-Processing ──────────────────────────────────────────────────────
@@ -324,17 +329,15 @@ def query_modifier(text: str) -> str:
     return q[0].upper() + q[1:]
 
 
-def _strip_wake_phrase(text: str) -> str:
-    try:
-        from Backend.WakeWordDetection import WAKE_WORDS, _WAKE_VARIANTS
-    except Exception:
-        WAKE_WORDS = ["hey kritix", "hello kritix", "listen kritix"]
-        _WAKE_VARIANTS = set()
+_WAKE_WORDS = ["hey kritix", "hello kritix", "listen kritix"]
+_WAKE_VARIANTS = set()
 
+
+def _strip_wake_phrase(text: str) -> str:
     t = re.sub(r"\s+", " ", text.lower()).strip()
     if not t:
         return ""
-    for ww in sorted((w.strip().lower() for w in WAKE_WORDS if w.strip()), key=len, reverse=True):
+    for ww in sorted((w.strip().lower() for w in _WAKE_WORDS if w.strip()), key=len, reverse=True):
         if t == ww:
             return ""
         if t.startswith(ww + " "):
@@ -352,16 +355,16 @@ def _set_status(status: str):
     try:
         with open(os.path.join(_DATA_DIR, "Status.data"), "w", encoding="utf-8") as f:
             f.write(status)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("[STT] Failed to set status: %s", exc)
 
 
 def _set_mic(status: str):
     try:
         with open(os.path.join(_DATA_DIR, "Mic.data"), "w", encoding="utf-8") as f:
             f.write(status)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("[STT] Failed to set mic status: %s", exc)
 
 
 # ── Core Transcription ────────────────────────────────────────────────────────
@@ -382,7 +385,6 @@ def transcribe(audio: bytes, duration: float = 0.0, language: str = "auto") -> s
     if model is None:
         return ""
     try:
-        import numpy as np
         arr = (np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0)
 
         # Pre-filter with Silero VAD to remove silence/noise
@@ -479,7 +481,6 @@ def transcribe_with_confidence(
     if model is None:
         return "", 0.0
     try:
-        import numpy as np
         arr = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
         arr = _vad_filter(arr, sr=16000)
         if len(arr) < int(0.3 * 16000):
@@ -508,7 +509,7 @@ def transcribe_with_confidence(
         return "", 0.0
 
 
-# alias used by WakeWord files
+# alias for backward compatibility
 transcribe_blocking = transcribe
 
 
@@ -557,7 +558,6 @@ def record_audio(
 ) -> Tuple[bytes, float]:
     """Record from mic until silence or timeout. Returns (pcm_bytes, duration)."""
     import pyaudio
-    import numpy as np
 
     p = pyaudio.PyAudio()
     chunk = 1024
@@ -623,8 +623,12 @@ def record_audio(
                 silence_count = 0
                 speech_started = True
     finally:
-        stream.stop_stream()
-        stream.close()
+        if stream is not None:
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception:
+                pass
         p.terminate()
 
     if not frames:
@@ -655,7 +659,7 @@ def listen(
 
 # ── Legacy SpeechRecognition() entry point ────────────────────────────────────
 
-def SpeechRecognition(previous_text: str = "") -> str:
+def SpeechRecognition() -> str:
     """
     Full pipeline: mic gate → record → transcribe → correct → strip wake phrase
     → query_modifier. Drop-in replacement for Backend.SpeechToText.SpeechRecognition.
@@ -664,15 +668,6 @@ def SpeechRecognition(previous_text: str = "") -> str:
         from Backend.TextToSpeech import is_currently_speaking
         if is_currently_speaking():
             return ""
-    except Exception:
-        pass
-
-    wake_detector = None
-    try:
-        from Backend.WakeWordDetection import get_active_detector
-        wake_detector = get_active_detector()
-        if wake_detector:
-            wake_detector.pause()
     except Exception:
         pass
 
@@ -712,11 +707,6 @@ def SpeechRecognition(previous_text: str = "") -> str:
         return ""
     finally:
         _set_mic("OFF")
-        try:
-            if wake_detector:
-                wake_detector.resume()
-        except Exception:
-            pass
 
 
 def detect_voice_emotion(pcm: bytes, sample_rate: int = 16000) -> str:

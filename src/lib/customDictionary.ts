@@ -53,7 +53,9 @@ export function applyCustomDictionary(text: string): string {
       for (const variant of item.phoneticVariants) {
         const vTrim = variant.trim()
         if (!vTrim) continue
-        const regex = new RegExp(`(^|\\s|[.,!?;:()"-])${escapeRegExp(vTrim)}(?=$|\\s|[.,!?;:()"-])`, 'gi')
+        // Anchor and cap repetition to prevent ReDoS on unbounded input
+        const safeWord = vTrim.replace(/\*+/g, (m) => '*'.repeat(Math.min(m.length, 20)))
+        const regex = new RegExp(`(^|[^a-zA-Z])${escapeRegExp(safeWord)}(?=[^a-zA-Z]|$)`, 'gi')
         resultText = resultText.replace(regex, (_, prefix) => `${prefix}${targetWord}`)
       }
     }

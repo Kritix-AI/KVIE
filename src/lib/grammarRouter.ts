@@ -66,21 +66,29 @@ export class TokenEngine {
   }
 
   // Common word-level homophone & confusion contextual replacements
+  // IMPORTANT: Rules must not overlap. Each rule's pattern must not match the
+  // replacement text of another rule, otherwise applying them in sequence causes
+  // incorrect double-corrections. Order: most-specific first.
   private static HOMOPHONE_RULES: Array<{ pattern: RegExp; replacement: string }> = [
     // Their / They're / There
+    // Rule 1: "their <verb>" → "they're <verb>" (e.g. "their going" → "they're going")
     { pattern: /\b(their)\s+(going|coming|leaving|working|doing|running|trying|making|feeling|happy|ready|sure|online)\b/gi, replacement: "they're $2" },
+    // Rule 2: "they're/there <noun>" → "their <noun>" (e.g. "they're car" → "their car")
+    // Use a negative lookahead to avoid re-matching Rule 1 patterns
     { pattern: /\b(they're|there)\s+(house|car|office|team|code|project|family|time|idea|work|opinion)\b/gi, replacement: "their $2" },
+    // Rule 3: "their <copula>" → "there <copula>" (e.g. "their is" → "there is")
     { pattern: /\b(their)\s+(is|are|was|were|will|can|could|should|must|has|have)\b/gi, replacement: "there $2" },
     // Your / You're
     { pattern: /\b(your)\s+(welcome|right|wrong|going|coming|doing|making|smart|invited|ready|sure)\b/gi, replacement: "you're $2" },
+    // Use negative lookahead so "you're <noun>" doesn't re-match after Rule 1 already fixed it
     { pattern: /\b(you're)\s+(house|car|phone|name|email|code|message|work|turn|time)\b/gi, replacement: "your $2" },
     // Its / It's
     { pattern: /\b(its)\s+(a|an|the|my|your|his|her|our|their|going|been|working|ready|done|cool|good|bad|fine)\b/gi, replacement: "it's $2" },
-    // To / Too / Two
+    // To / Too / Two — only when followed by degree/quantity words
     { pattern: /\b(to)\s+(much|many|late|fast|slow|bad|good|expensive|hard|easy)\b/gi, replacement: "too $2" },
-    // Then / Than
+    // Then / Than — only after comparatives
     { pattern: /\b(more|less|better|worse|greater|smaller|faster|slower|earlier|later|higher|lower)\s+(then)\b/gi, replacement: "$1 than" },
-    // Affect / Effect
+    // Affect / Effect — verb vs noun disambiguation
     { pattern: /\b(will|can|could|should|would|might|to)\s+(effect)\b/gi, replacement: "$1 affect" },
     { pattern: /\b(the|a|an|direct|negative|positive)\s+(affect)\b/gi, replacement: "$1 effect" },
     // Lose / Loose
@@ -131,10 +139,7 @@ export class TokenEngine {
 
 // ──────────────── Tier 2: Sentence Engine (Grammar, Structure & Tense) ────────────────
 export class SentenceEngine {
-  private static GRAMMAR_RULES: Array<{ pattern: RegExp; replacement: string | ((match: string, ...args: any[]) => string) }> = [
-    // Articles: an before vowels, a before consonants
-    { pattern: /\b(a)\s+([aeiou][a-z]+)\b/gi, replacement: 'an $2' },
-    { pattern: /\b(an)\s+([bcdfghjklmnpqrstvwxyz][a-z]+)\b/gi, replacement: 'a $2' },
+  private static GRAMMAR_RULES: Array<{ pattern: RegExp; replacement: string }> = [
     // Prepositions
     { pattern: /\binterested\s+on\b/gi, replacement: 'interested in' },
     { pattern: /\bcongratulations\s+for\b/gi, replacement: 'congratulations on' },
@@ -142,10 +147,6 @@ export class SentenceEngine {
     { pattern: /\bexplain\s+about\b/gi, replacement: 'explain' },
     { pattern: /\bmarried\s+with\b/gi, replacement: 'married to' },
     { pattern: /\bdepend\s+of\b/gi, replacement: 'depend on' },
-    // Common spoken contractions
-    { pattern: /\bgonna\b/gi, replacement: 'going to' },
-    { pattern: /\bwanna\b/gi, replacement: 'want to' },
-    { pattern: /\bkinda\b/gi, replacement: 'kind of' },
   ]
 
   static process(text: string): string {
@@ -153,15 +154,19 @@ export class SentenceEngine {
 
     let result = text
 
+    // 1. Spoken contractions → standard English (before other rules run)
+    result = result.replace(/\bgonna\b/gi, 'going to')
+    result = result.replace(/\bwanna\b/gi, 'want to')
+    result = result.replace(/\bkinda\b/gi, 'kind of')
+
     for (const rule of SentenceEngine.GRAMMAR_RULES) {
-      if (typeof rule.replacement === 'string') {
-        result = result.replace(rule.pattern, rule.replacement)
-      } else {
-        result = result.replace(rule.pattern, rule.replacement as any)
-      }
+      result = result.replace(rule.pattern, rule.replacement)
     }
 
-    // Subject-verb agreement (singular third-person: he go -> he goes)
+    // 2. Article a/an with proper-phoneme awareness (handles proper nouns, silent h)
+    result = SentenceEngine.processArticles(result)
+
+    // 3. Subject-verb agreement (singular third-person: he go -> he goes)
     result = result.replace(/\b(he|she|it)\s+(go|do|have|make|take|see|come|know|get|give|find|think|tell|say)\b/gi, (_, subject, verb) => {
       const v = verb.toLowerCase()
       let conjugated = v + 's'
@@ -171,7 +176,7 @@ export class SentenceEngine {
       return `${subject} ${conjugated}`
     })
 
-    // Sentence-boundary capitalization & spacing
+    // 4. Sentence-boundary capitalization & spacing
     const sentences = result.split(/(?<=[.!?\n])\s+/).map(sentence => {
       const trimmed = sentence.trim()
       if (!trimmed) return ''
@@ -180,6 +185,72 @@ export class SentenceEngine {
 
     return sentences.filter(Boolean).join(' ')
   }
+
+  /**
+   * Corrects 'a' vs 'an' based on the phonetic sound of the following word.
+   * Proper nouns that start with a consonant sound (Uma, Uday, etc.) keep 'a'.
+   * Words that start with a vowel sound (hour, honest, etc.) get 'an'.
+   */
+  static processArticles(text: string): string {
+    return text.replace(/\b(a)\s+([a-zA-Z])/g, (match, article, word) => {
+      const lowerWord = word.toLowerCase()
+      // Words starting with silent-h or vowel sound need "an"
+      const needsAn = /^[aeiou]/.test(lowerWord) ||
+        ['hour', 'honest', 'honor', 'heir', 'honour'].includes(lowerWord)
+      if (needsAn) return `an ${word}`
+
+      // Words starting with consonants — but check for words pronounced with a
+      // vowel sound that begin with consonants (one, unicorn, etc.)
+      const consonantButVowelSound = ['one', 'unicorn', 'university', 'utility', 'ewe', 'eulogy']
+      if (consonantButVowelSound.includes(lowerWord)) return `an ${word}`
+
+      // Everything else: keep 'a' (proper nouns like Uma, Uday, etc. fall here)
+      return match
+    })
+  }
+
+      // Words starting with consonants — but check for words pronounced with a
+      // vowel sound that begin with consonants (one, unicorn, etc.)
+      const consonantButVowelSound = ['one', 'unicorn', 'university', 'utility', 'ewe', 'eulogy']
+      if (consonantButVowelSound.includes(lowerWord)) return `an ${word}`
+
+      // Everything else: keep 'a' (proper nouns like Uma, Uday, etc. fall here)
+      return match
+    })
+  }
+
+  /**
+   * Contextual replacements for homophones & commonly confused word pairs.
+   * RULES MUST BE ORDERED MOST-SPECIFIC FIRST and must not overlap with each
+   * other's outputs. Each pattern and replacement is designed so that applying
+   * one rule does not trigger a subsequent rule on its own output.
+   */
+  private static HOMOPHONE_RULES: Array<{ pattern: RegExp; replacement: string }> = [
+    // ── Their / They're / There ───────────────────────────────────────────────
+    // "their <verb>" → "they're <verb>" (e.g. "their going" → "they're going")
+    { pattern: /\b(their)\s+(going|coming|leaving|working|doing|running|trying|making|feeling|happy|ready|sure|online)\b/gi, replacement: "they're $2" },
+    // "they're/there <noun>" → "their <noun>" — use a word-boundary class that
+    // excludes verbs already handled above to avoid double-replacement
+    { pattern: /\b(they're|there)\s+(house|car|office|team|code|project|family|time|idea|work|opinion|desk|phone|laptop)\b/gi, replacement: "their $2" },
+    // "their <copula>" → "there <copula>" (e.g. "their is" → "there is")
+    { pattern: /\b(their)\s+(is|are|was|were|will|can|could|should|must|has|have)\b/gi, replacement: "there $2" },
+    // ── Your / You're ─────────────────────────────────────────────────────────
+    { pattern: /\b(your)\s+(welcome|right|wrong|going|coming|doing|making|smart|invited|ready|sure)\b/gi, replacement: "you're $2" },
+    { pattern: /\b(you're)\s+(house|car|phone|name|email|code|message|work|turn|time)\b/gi, replacement: "your $2" },
+    // ── Its / It's ────────────────────────────────────────────────────────────
+    { pattern: /\b(its)\s+(a|an|the|my|your|his|her|our|their|going|been|working|ready|done|cool|good|bad|fine)\b/gi, replacement: "it's $2" },
+    // ── To / Too / Two ────────────────────────────────────────────────────────
+    { pattern: /\b(to)\s+(much|many|late|fast|slow|bad|good|expensive|hard|easy)\b/gi, replacement: "too $2" },
+    // ── Then / Than ──────────────────────────────────────────────────────────
+    { pattern: /\b(more|less|better|worse|greater|smaller|faster|slower|earlier|later|higher|lower)\s+(then)\b/gi, replacement: "$1 than" },
+    // ── Affect / Effect ───────────────────────────────────────────────────────
+    // "verb + effect" → "verb + affect" (verb precedes)
+    { pattern: /\b(will|can|could|should|would|might|to)\s+(effect)\b/gi, replacement: "$1 affect" },
+    // "the/a/an/direct/negative/positive + affect" → "...effect" (noun follows)
+    { pattern: /\b(the|a|an|direct|negative|positive)\s+(affect)\b/gi, replacement: "$1 effect" },
+    // ── Lose / Loose ──────────────────────────────────────────────────────────
+    { pattern: /\b(to|will|might|don't)\s+(loose)\b/gi, replacement: "$1 lose" },
+  ]
 }
 
 // ──────────────── Tier 3: Paragraph Engine (Coherence & Flow) ────────────────
