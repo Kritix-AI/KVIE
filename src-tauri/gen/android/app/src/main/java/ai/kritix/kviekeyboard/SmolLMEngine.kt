@@ -24,12 +24,8 @@ class SmolLMEngine(private val context: Context) {
         const val MODEL_REPO = "HuggingFaceTB/SmolLM2-360M-Instruct"
         const val MODEL_MIN_BYTES = 50L * 1024 * 1024
 
-        enum class VoiceCommandType {
-            DELETE_LAST_WORD, DELETE_LAST_SENTENCE, CLEAR_ALL,
-            NEW_LINE, MAKE_FORMAL, MAKE_CASUAL, NONE
-        }
 
-        private val SENTENCE_PATTERN = Regex("(?<=[.!?\n]\s*)([a-z])")
+        private val SENTENCE_PATTERN = Regex("""(?<=[.!?\n]\s*)([a-z])""")
         private val PROPER_NOUNS = setOf(
             "monday","tuesday","wednesday","thursday","friday","saturday","sunday",
             "january","february","march","april","may","june","july","august",
@@ -38,40 +34,40 @@ class SmolLMEngine(private val context: Context) {
             "kvie","kritix","english","hindi"
         )
         private val FILLER_PATTERNS = listOf(
-            Regex("(?i)\b(um+|umm+|ummm+)\b"),
-            Regex("(?i)\b(uh+|uhh+|ah+|ahh+|er+|err+|eh+)\b"),
-            Regex("(?i)\b(matlab\s*ki|matlab|yaani|matlab\s*ki)\b"),
-            Regex("(?i)\b(basically|literally|actually)\b"),
-            Regex("(?i)\b(you know|i mean|so yeah)\b"),
-            Regex("(?i)(^\s*like\s+)|(,\s*like\s*,?)|(\s+like\s+(?=[,.:;?!]))")
+            Regex("(?i)\\b(um+|umm+|ummm+)\\b"),
+            Regex("(?i)\\b(uh+|uhh+|ah+|ahh+|er+|err+|eh+)\\b"),
+            Regex("(?i)\\b(matlab\\s*ki|matlab|yaani|matlab\\s*ki)\\b"),
+            Regex("(?i)\\b(basically|literally|actually)\\b"),
+            Regex("(?i)\\b(you know|i mean|so yeah)\\b"),
+            Regex("(?i)(^\\s*like\\s+)|(,\\s*like\\s*,?)|(\\s+like\\s+(?=[,.:;?!]))")
         )
         private val SPOKEN_PUNCTUATION = listOf(
-            Regex("(?i)\b(period|full stop)\b") to ".",
-            Regex("(?i)\bcomma\b") to ",",
-            Regex("(?i)\bquestion mark\b") to "?",
-            Regex("(?i)\b(exclamation mark|exclamation point)\b") to "!",
-            Regex("(?i)\bcolon\b") to ":",
-            Regex("(?i)\bsemicolon\b") to ";",
-            Regex("(?i)\b(new line|next line)\b") to "\n",
-            Regex("(?i)\b(open paren|open parenthesis)\b") to "(",
-            Regex("(?i)\b(close paren|close parenthesis)\b") to ")",
-            Regex("(?i)\b(dash|hyphen)\b") to "-"
+            Regex("(?i)\\b(period|full stop)\\b") to ".",
+            Regex("(?i)\\bcomma\\b") to ",",
+            Regex("(?i)\\bquestion mark\\b") to "?",
+            Regex("(?i)\\b(exclamation mark|exclamation point)\\b") to "!",
+            Regex("(?i)\\bcolon\\b") to ":",
+            Regex("(?i)\\bsemicolon\\b") to ";",
+            Regex("(?i)\\b(new line|next line)\\b") to "\n",
+            Regex("(?i)\\b(open paren|open parenthesis)\\b") to "(",
+            Regex("(?i)\\b(close paren|close parenthesis)\\b") to ")",
+            Regex("(?i)\\b(dash|hyphen)\\b") to "-"
         )
 
         fun parseVoiceCommand(transcript: String): VoiceCommandType {
             val lower = transcript.lowercase().trim()
             return when {
-                lower.matches(Regex(".*\b(delete that|scratch that|remove that|delete last word|remove last)\b.*"))
+                lower.matches(Regex(".*\\b(delete that|scratch that|remove that|delete last word|remove last)\\b.*"))
                     -> VoiceCommandType.DELETE_LAST_WORD
-                lower.matches(Regex(".*\b(delete sentence|remove sentence|scratch sentence|delete last sentence)\b.*"))
+                lower.matches(Regex(".*\\b(delete sentence|remove sentence|scratch sentence|delete last sentence)\\b.*"))
                     -> VoiceCommandType.DELETE_LAST_SENTENCE
-                lower.matches(Regex(".*\b(clear all|delete all|clear everything|start over|scratch all)\b.*"))
+                lower.matches(Regex(".*\\b(clear all|delete all|clear everything|start over|scratch all)\\b.*"))
                     -> VoiceCommandType.CLEAR_ALL
-                lower.matches(Regex(".*\b(new line|next line|next paragraph|new paragraph|line break|enter)\b.*"))
+                lower.matches(Regex(".*\\b(new line|next line|next paragraph|new paragraph|line break|enter)\\b.*"))
                     -> VoiceCommandType.NEW_LINE
-                lower.matches(Regex(".*\b(make formal|formal mode|formal tone|formal please)\b.*"))
+                lower.matches(Regex(".*\\b(make formal|formal mode|formal tone|formal please)\\b.*"))
                     -> VoiceCommandType.MAKE_FORMAL
-                lower.matches(Regex(".*\b(make casual|casual mode|casual tone|informal please|keep it casual)\b.*"))
+                lower.matches(Regex(".*\\b(make casual|casual mode|casual tone|informal please|keep it casual)\\b.*"))
                     -> VoiceCommandType.MAKE_CASUAL
                 else -> VoiceCommandType.NONE
             }
@@ -82,19 +78,19 @@ class SmolLMEngine(private val context: Context) {
             var result = text.trim()
             for ((regex, sym) in SPOKEN_PUNCTUATION) result = regex.replace(result, sym)
             for (pattern in FILLER_PATTERNS) result = pattern.replace(result, " ")
-            result = result.replace(Regex(",\s*,"), ",")
-                .replace(Regex("^[,.:;?!\s]+"), "")
-                .replace(Regex("\s+([,.:;?!])"), "$1")
+            result = result.replace(Regex(",\\s*,"), ",")
+                .replace(Regex("^[,.:;?!\\s]+"), "")
+                .replace(Regex("\\s+([,.:;?!])"), "$1")
                 .replace(Regex("([,.:;?!])([a-zA-Z])"), "$1 $2")
-                .replace(Regex("\s+"), " ").trim()
+                .replace(Regex("\\s+"), " ").trim()
             if (result.isBlank()) return ""
-            result = result.replace(Regex("(?i)\bi\b"), "I")
-                .replace(Regex("(?i)\bi'm\b"), "I'm")
-                .replace(Regex("(?i)\bi've\b"), "I've")
-                .replace(Regex("(?i)\bi'll\b"), "I'll")
-                .replace(Regex("(?i)\bi'd\b"), "I'd")
+            result = result.replace(Regex("(?i)\\bi\\b"), "I")
+                .replace(Regex("(?i)\\bi'm\\b"), "I'm")
+                .replace(Regex("(?i)\\bi've\\b"), "I've")
+                .replace(Regex("(?i)\\bi'll\\b"), "I'll")
+                .replace(Regex("(?i)\\bi'd\\b"), "I'd")
             result = SENTENCE_PATTERN.replace(result) { it.value.uppercase() }
-            val words = result.split(Regex("\s+")).toMutableList()
+            val words = result.split(Regex("\\s+")).toMutableList()
             for (i in words.indices) {
                 val clean = words[i].lowercase().replace(Regex("[^a-zA-Z]"), "")
                 if (clean in PROPER_NOUNS) {

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
@@ -46,6 +47,7 @@ class FloatingMicService : Service() {
     private var floatingView: View? = null
     private var trashView: View? = null
     private var bubbleContainer: FrameLayout? = null
+    private var bubbleGlow: View? = null
     private var bubbleMicIcon: ImageView? = null
     private var statusLabel: TextView? = null
 
@@ -414,12 +416,6 @@ class FloatingMicService : Service() {
         scope.cancel()
         mainScope.cancel()
         whisperEngine?.release()
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
-        } catch (_: Exception) {}
-        speechRecognizer = null
         if (floatingView != null) {
             windowManager?.removeView(floatingView)
             floatingView = null

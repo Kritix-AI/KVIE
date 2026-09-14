@@ -12,7 +12,11 @@ import okhttp3.Request
 import okhttp3.ResponseBody
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Minimal HuggingFace model downloader.
@@ -22,8 +26,8 @@ object HfApiWrapper {
 
     private const val TAG = "HfApiWrapper"
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30)
-        .readTimeout(120)
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     /**
@@ -42,40 +46,41 @@ object HfApiWrapper {
         var allOk = true
 
         for (filename in filenames) {
-            val dest = File(targetDir, filename)
-            if (dest.exists() && dest.length() > 0) {
-                Log.d(TAG, "Skip existing: $filename")
-                continue
-            }
+            if (allOk) {
+                val dest = File(targetDir, filename)
+                if (dest.exists() && dest.length() > 0) {
+                    Log.d(TAG, "Skip existing: $filename")
+                    continue
+                }
 
-            val url = "https://huggingface.co/$repoId/resolve/main/$filename"
-            Log.d(TAG, "Downloading: $url")
+                val url = "https://huggingface.co/$repoId/resolve/main/$filename"
+                Log.d(TAG, "Downloading: $url")
 
-            try {
-                val request = Request.Builder().url(url).build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Failed: $filename → HTTP ${response.code}")
-                        allOk = false
-                        continue
-                    }
+                try {
+                    val request = Request.Builder().url(url).build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            Log.e(TAG, "Failed: $filename → HTTP ${response.code}")
+                            allOk = false
+                        } else {
+                            val body: ResponseBody = response.body ?: run {
+                                allOk = false
+                                return@use
+                            }
 
-                    val body: ResponseBody = response.body ?: run {
-                        allOk = false
-                        continue
-                    }
+                            body.byteStream().use { input ->
+                                FileOutputStream(dest).use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
 
-                    body.byteStream().use { input ->
-                        FileOutputStream(dest).use { output ->
-                            input.copyTo(output)
+                            Log.d(TAG, "Saved: ${dest.absolutePath} (${dest.length()} bytes)")
                         }
                     }
-
-                    Log.d(TAG, "Saved: ${dest.absolutePath} (${dest.length()} bytes)")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error downloading $filename: ${e.message}")
+                    allOk = false
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error downloading $filename: ${e.message}")
-                allOk = false
             }
         }
 

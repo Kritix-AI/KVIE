@@ -136,7 +136,7 @@ class WhisperEngine(private val context: Context) {
 
     suspend fun stopTranscription(): String = withContext(Dispatchers.IO) {
         val text = buildCurrentTranscript()
-        stopRecording()
+        stop()
         text
     }
 
@@ -322,7 +322,7 @@ class WhisperEngine(private val context: Context) {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Attempt ${attempt + 1} failed: ${e.message}")
-                if (attempt < retries - 1) delay(200 * (attempt + 1))
+                if (attempt < retries - 1) delay((200 * (attempt + 1)).toLong())
             }
         }
         ""
@@ -339,15 +339,22 @@ class WhisperEngine(private val context: Context) {
     // ─── Utilities ───────────────────────────────────────────────────────────
 
     private fun pcmToWav(samples: ShortArray, sr: Int): ByteArray {
-        val ds = samples.size * 2
+        val ds: Int = samples.size * 2
         return ByteArrayOutputStream(44 + ds).apply {
             write("RIFF".toByteArray())
-            write(le32(36 + ds)); write("WAVE".toByteArray())
-            write("fmt ".toByteArray()); write(le32(16))
-            write(le16(1)); write(le16(1)); write(le32(sr))
-            write(le32(sr * 2)); write(le16(2)); write(le16(16))
-            write("data".toByteArray()); write(le32(ds))
-            for (s in samples) { write(s.toByte()); write((s.toInt() ushr 8).toByte()) }
+            write(le32(36 + ds))
+            write("WAVE".toByteArray())
+            write("fmt ".toByteArray())
+            write(le32(16))
+            write(le16(1))
+            write(le16(1))
+            write(le32(sr))
+            write(le32(sr * 2))
+            write(le16(2))
+            write(le16(16))
+            write("data".toByteArray())
+            write(le32(ds))
+            for (s in samples) { write(byteArrayOf(s.toByte())); write(byteArrayOf((s.toInt() ushr 8).toByte())) }
         }.toByteArray()
     }
 
@@ -364,15 +371,15 @@ class WhisperEngine(private val context: Context) {
         vad.reset()
     }
 
-    private fun buildCurrentTranscript(): String {
+    private suspend fun buildCurrentTranscript(): String {
         // Combine pre-speech + current for best result
         val all = if (preSpeechBuffer.isNotEmpty()) preSpeechBuffer + currentSegment else currentSegment
         if (all.isEmpty()) return ""
         // Send remaining audio for final transcription
         return engineScope.runCatching {
             val wav = pcmToWav(all.toShortArray(), sampleRate)
-            sendToBackend(wav, isPartial = false)
-        }.getOrNull() ?: ""
+            sendToBackend(all.toShortArray(), isPartial = false)
+        }.getOrElse { "" }
     }
 
     fun release() {

@@ -67,11 +67,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
     // ONNX Runtime Mobile for Parakeet TDT streaming STT
-    implementation("com.microsoft.onnxruntime:ortmobile:1.17.0")
-    implementation("com.microsoft.onnxruntime:ortruntime:1.17.0")
-
-    // llama.cpp Android bindings for SmolLM2 GGUF inference
-    implementation("com.github.humblerocket:llama-android:0.0.6")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")

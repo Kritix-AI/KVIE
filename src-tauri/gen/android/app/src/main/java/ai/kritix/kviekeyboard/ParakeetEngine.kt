@@ -125,14 +125,7 @@ class ParakeetEngine(private val context: Context) {
 
         connection.inputStream.use { input ->
             FileOutputStream(dest).use { output ->
-                val buffer = ByteArray
-                var total = 0L
-                var read: Int
-                while (input.read(buffer).also { read = it } != -1) {
-                    output.write(buffer, 0, read)
-                    total += read
-                    // Could emit progress here
-                }
+                input.copyTo(output)
             }
         }
         Log.i(TAG, "Downloaded ${dest.name}: ${dest.length() / 1024}KB")
@@ -312,7 +305,7 @@ class ParakeetEngine(private val context: Context) {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Transcribe attempt ${attempt + 1} failed: ${e.message}")
-                if (attempt < retries - 1) delay(200 * (attempt + 1))
+                if (attempt < retries - 1) delay((200 * (attempt + 1)).toLong())
             }
         }
 
@@ -347,8 +340,8 @@ class ParakeetEngine(private val context: Context) {
             write("data".toByteArray())
             write(intToLe(dataSize))
             for (s in samples) {
-                write(s.toByte())
-                write((s.toInt() ushr 8).toByte())
+                write(byteArrayOf(s.toByte()))
+                write(byteArrayOf((s.toInt() ushr 8).toByte()))
             }
         }
         return buffer.toByteArray()

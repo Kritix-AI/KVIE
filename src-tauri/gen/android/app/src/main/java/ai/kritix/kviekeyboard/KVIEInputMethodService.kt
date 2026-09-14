@@ -29,7 +29,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.widget.Button
 import android.widget.EditText
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.HorizontalScrollView
@@ -72,7 +74,7 @@ class KVIEInputMethodService : InputMethodService() {
     private var isListening = false
     private var isShifted = false
     private var isCapsLock = false
-    private isSymbolsMode = false
+    private var isSymbolsMode = false
     private var isSymbolsSecondaryPage = false
     private var isNumberRowVisible = true
     private var currentMode = Mode.TEXT        // TEXT | EMOJI | HINDI | SNIPPETS
@@ -2128,10 +2130,10 @@ class KVIEInputMethodService : InputMethodService() {
 
         // 1. Real-Time Voice Editing Command Interception
         val command = SmolLMEngine.parseVoiceCommand(rawTranscript)
-        if (command != null) {
+        if (command != VoiceCommandType.NONE) {
             performKeyHaptic()
-            when (command.type) {
-                SmolLMEngine.VoiceCommandType.DELETE_LAST_WORD -> {
+            when (command) {
+                VoiceCommandType.DELETE_LAST_WORD -> {
                     val before = ic.getTextBeforeCursor(60, 0)?.toString() ?: ""
                     val trimmed = before.trimEnd()
                     val lastWord = trimmed.substringAfterLast(" ", "")
@@ -2143,7 +2145,7 @@ class KVIEInputMethodService : InputMethodService() {
                     updateSuggestions()
                     return
                 }
-                SmolLMEngine.VoiceCommandType.DELETE_LAST_SENTENCE -> {
+                VoiceCommandType.DELETE_LAST_SENTENCE -> {
                     val before = ic.getTextBeforeCursor(300, 0)?.toString() ?: ""
                     val idx = maxOf(before.lastIndexOf('.'), before.lastIndexOf('?'), before.lastIndexOf('!'))
                     if (idx != -1 && idx < before.length - 1) {
@@ -2154,25 +2156,26 @@ class KVIEInputMethodService : InputMethodService() {
                     updateSuggestions()
                     return
                 }
-                SmolLMEngine.VoiceCommandType.CLEAR_ALL -> {
+                VoiceCommandType.CLEAR_ALL -> {
                     val before = ic.getTextBeforeCursor(2000, 0)?.toString() ?: ""
                     ic.deleteSurroundingText(before.length, 0)
                     updateSuggestions()
                     return
                 }
-                SmolLMEngine.VoiceCommandType.NEW_LINE -> {
+                VoiceCommandType.NEW_LINE -> {
                     insertNewline()
                     updateSuggestions()
                     return
                 }
-                SmolLMEngine.VoiceCommandType.MAKE_FORMAL -> {
+                VoiceCommandType.MAKE_FORMAL -> {
                     triggerAIPolish("formal")
                     return
                 }
-                SmolLMEngine.VoiceCommandType.MAKE_CASUAL -> {
+                VoiceCommandType.MAKE_CASUAL -> {
                     triggerAIPolish("casual")
                     return
                 }
+                else -> {}
             }
         }
 
