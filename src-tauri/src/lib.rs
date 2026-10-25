@@ -28,6 +28,8 @@ struct DocumentState {
     redo: Vec<String>,
 }
 
+const MAX_ERASE_COUNT: usize = 500;
+
 #[derive(Serialize)]
 struct RuntimeStatus {
     desktop: bool,
@@ -57,9 +59,18 @@ static APP_HANDLE_FOR_HOTKEY: Mutex<Option<tauri::AppHandle>> = Mutex::new(None)
 #[cfg(target_os = "windows")]
 static IS_HOTKEY_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "lowercase")]
+enum DocumentAction {
+    Append,
+    Insert,
+    Replace,
+    Clear,
+}
+
 #[derive(Deserialize)]
 struct DocumentEdit {
-    action: String,
+    action: DocumentAction,
     text: Option<String>,
     start: Option<usize>,
     end: Option<usize>,
@@ -132,33 +143,40 @@ fn get_document(state: tauri::State<'_, KvieState>) -> Result<DocumentSnapshot, 
 fn apply_document_edit(edit: DocumentEdit, state: tauri::State<'_, KvieState>) -> Result<DocumentSnapshot, String> {
     let mut document = state.document.lock().map_err(|_| "document lock poisoned".to_string())?;
     let before = document.text.clone();
+
+    let max_len = document.text.len().saturating_add(100 * 1024);
     let content = edit.text.unwrap_or_default();
-    match edit.action.as_str() {
-        "append" => {
+    if content.len() > 100 * 1024 {
+        return Err("edit text exceeds maximum allowed size".to_string());
+    }
+    let sanitized: String = content.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect();
+
+    match edit.action {
+        DocumentAction::Append => {
             if !document.text.is_empty() && !document.text.ends_with(' ') && !document.text.ends_with('\n') { document.text.push(' '); }
-            document.text.push_str(content.trim());
+            document.text.push_str(sanitized.trim());
             document.cursor = document.text.len();
         }
-        "insert" => {
+        DocumentAction::Insert => {
             let position = edit.start.unwrap_or(document.cursor).min(document.text.len());
-            document.text.insert_str(position, &content);
-            document.cursor = position + content.len();
+            if position > max_len { return Err("insert position out of bounds".to_string()); }
+            document.text.insert_str(position, &sanitized);
+            document.cursor = position + sanitized.len();
         }
-        "replace" => {
+        DocumentAction::Replace => {
             let start = edit.start.ok_or("replace requires start")?.min(document.text.len());
             let end = edit.end.ok_or("replace requires end")?.min(document.text.len());
             if start > end { return Err("replace start must be <= end".to_string()); }
-            document.text.replace_range(start..end, &content);
-            document.cursor = start + content.len();
+            document.text.replace_range(start..end, &sanitized);
+            document.cursor = start + sanitized.len();
         }
-        "clear" => { document.text.clear(); document.cursor = 0; }
-        _ => return Err(format!("unsupported document action: {}", edit.action)),
+        DocumentAction::Clear => { document.text.clear(); document.cursor = 0; }
     }
     if before != document.text {
         document.undo.push(before.clone());
         document.redo.clear();
         document.version += 1;
-        persist_document(&state.db_path, &document, &edit.action, &before)?;
+        persist_document(&state.db_path, &document, &format!("{:?}", edit.action).to_lowercase(), &before)?;
     }
     Ok(snapshot(&document))
 }
@@ -197,43 +215,37 @@ fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
     {
         use std::thread;
 
+        let capped_erase = erase_count.min(MAX_ERASE_COUNT);
+        let sanitized: String = text.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect();
+        if sanitized.is_empty() && capped_erase == 0 {
+            return Ok(());
+        }
+
         let mut enigo = Enigo::new(&Settings::default()).map_err(|error| format!("keyboard unavailable: {error}"))?;
 
-        // ── Phase 1: Erase only the changed characters with backspace ──────
-        // The erase_count comes from the IncrementalTypingEngine which tracks
-        // exactly how many characters of the interim text changed. We only
-        // backspace those — never touching committed text.
-        if erase_count > 0 {
-            for _ in 0..erase_count {
+        if capped_erase > 0 {
+            for _ in 0..capped_erase {
                 let _ = enigo.key(Key::Backspace, Direction::Click);
-                // Brief pause between backspaces for apps that process input slowly
                 thread::sleep(Duration::from_millis(5));
             }
-            // Small pause before typing new text
             thread::sleep(Duration::from_millis(15));
         }
 
-        // ── Phase 2: Clipboard paste (bypasses IME auto-correct) ────────
-        // Pasting the full text at once avoids Windows IME auto-correcting
-        // individual characters (e.g. "we" → "e") during char-by-char typing.
-        if text.is_empty() {
+        if sanitized.is_empty() {
             return Ok(());
         }
 
         let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
-        let text_clone = text.clone();
-        clipboard.set_text(text_clone).map_err(|error| format!("clipboard write failed: {error}"))?;
+        clipboard.set_text(sanitized.clone()).map_err(|error| format!("clipboard write failed: {error}"))?;
 
-        // Small human-like delay before paste (avoids instant-paste detection)
         thread::sleep(Duration::from_millis(50));
 
         let _ = enigo.key(Key::Control, Direction::Press);
         let _ = enigo.key(Key::Other(0x56), Direction::Click);
         let _ = enigo.key(Key::Control, Direction::Release);
 
-        // Clear clipboard after delay
         thread::spawn(|| {
-            thread::sleep(Duration::from_secs(3));
+            thread::sleep(Duration::from_secs(1));
             let _ = Clipboard::new().and_then(|mut c| c.set_text(""));
         });
 
@@ -242,7 +254,7 @@ fn erase_and_inject(erase_count: usize, text: String) -> Result<(), String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (erase_count, text);
-        Ok(())
+        Err("injection is not supported on this platform".to_string())
     }
 }
 
@@ -736,12 +748,22 @@ fn start_python_service() {
 #[tauri::command]
 fn download_model_native(app_handle: tauri::AppHandle, model_id: String) -> Result<(), String> {
     std::thread::spawn(move || {
+        let normalized = model_id.trim().to_lowercase();
+
+        const ALLOWED_MODELS: &[&str] = &["tiny", "base", "small", "medium", "large"];
+        if !ALLOWED_MODELS.contains(&normalized.as_str()) {
+            let _ = app_handle.emit(
+                "model-download-error",
+                format!("model_id '{}' is not an allowed identifier", model_id),
+            );
+            return;
+        }
+
         let root = get_project_root();
         let root_str = root.to_string_lossy().replace('\\', "/");
 
-        let script = format!(
-            r#"import sys, os, json
-root = "{}"
+        let script = r#"import sys, os, json
+root = os.environ["__KVIE_ROOT__"]
 if root and root not in sys.path:
     sys.path.insert(0, root)
 try:
@@ -755,20 +777,19 @@ from Backend.voice import ModelManager
 def on_progress(p):
     print("PROGRESS_JSON:" + json.dumps(p), flush=True)
 
-ModelManager.download_model_stream("{}", on_progress)
-"#,
-            root_str,
-            model_id
-        );
+ModelManager.download_model_stream(os.environ["__MODEL_ID__"], on_progress)
+"#;
 
         #[cfg(target_os = "windows")]
         use std::os::windows::process::CommandExt;
 
         let mut cmd = std::process::Command::new("python");
-        cmd.args(&["-u", "-c", &script]);
+        cmd.args(&["-u", "-c", script]);
         cmd.current_dir(&root);
         cmd.env("PYTHONPATH", &root);
         cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("__KVIE_ROOT__", &root_str);
+        cmd.env("__MODEL_ID__", &normalized);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         #[cfg(target_os = "windows")]
