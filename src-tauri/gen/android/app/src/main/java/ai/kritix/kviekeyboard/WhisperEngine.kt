@@ -14,16 +14,15 @@ import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
 
-private const val TAG = "WhisperEngine"
+private const val TAG = "LegacyWhisperBackendClient"
 private const val SAMPLE_RATE = 16000
 
 data class VADResult(val isSpeech: Boolean, val probability: Float, val energy: Float)
 
 /**
- * Silero VAD-based voice activity detector.
- * Lightweight energy-based VAD with smoothing for Android.
+ * Lightweight RMS energy detector. This is not the Silero VAD model.
  */
-class SileroVAD(private val threshold: Float = 0.5f) {
+class EnergyVAD(private val threshold: Float = 0.5f) {
     private val smoothed = FloatArray(3) { 0f }
     private var probability = 0f
 
@@ -60,13 +59,8 @@ data class TranscriptionResult(
 )
 
 /**
- * On-device Whisper Engine with Silero VAD for Android.
- *
- * Pipeline:
- * 1. AudioRecord → Silero VAD (detect speech start/end in real-time)
- * 2. Stream speech segments to Whisper backend
- * 3. Partial results emitted as user speaks
- * 4. Final result on silence timeout
+ * Legacy audio capture client that sends WAV audio to a configured Whisper backend.
+ * It contains no Whisper or Silero model weights and is not used by the Android mic UI.
  *
  * Expected: <500ms end-of-speech to final text on mid-range devices.
  */
@@ -82,7 +76,7 @@ class WhisperEngine(private val context: Context) {
     private var minSpeechMs = 250
     private var maxDurationMs = 30000
     private var backendUrl = "http://127.0.0.1:8765"
-    private val vad = SileroVAD(threshold = 0.5f)
+    private val vad = EnergyVAD(threshold = 0.5f)
 
     // Callbacks
     private var onPartial: ((String) -> Unit)? = null

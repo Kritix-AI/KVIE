@@ -1,0 +1,364 @@
+.workspace-shell {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1440px;
+  min-width: 0;
+  min-height: 0;
+  gap: 18px;
+  padding: 16px 16px 24px;
+}
+
+/* Keep the secondary pages aligned with the wider Workspace canvas. */
+.kvie-page-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1440px;
+  padding-inline: 12px;
+}
+
+.kvie-page-content > * {
+  min-width: 0;
+}
+
+.kvie-page-content p,
+.kvie-page-content h3,
+.kvie-page-content h4 {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.kvie-models-page {
+  max-width: 1440px;
+}
+
+.kvie-models-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 420px));
+  justify-content: center;
+  align-items: stretch;
+}
+
+.kvie-models-grid > * {
+  min-width: 0;
+}
+
+.kvie-models-page .flex.items-center.justify-between {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.kvie-models-page .flex.items-center.gap-3 > :last-child {
+  min-width: 0;
+}
+
+.kvie-settings-page {
+  max-width: 1440px;
+}
+
+.kvie-settings-page .flex.items-center.justify-between {
+  flex-wrap: wrap;
+  column-gap: 16px;
+  row-gap: 12px;
+}
+
+.kvie-settings-page .flex.items-center.justify-between > :first-child {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.kvie-settings-hotkey {
+  flex-wrap: wrap;
+}
+
+.kvie-settings-hotkey > button {
+  flex: 0 0 auto;
+}
+
+.kvie-settings-page .flex > * {
+  min-width: 0;
+}
+
+.kvie-settings-page .flex.items-center.gap-2,
+.kvie-settings-page .flex.items-center.gap-3 {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.kvie-page-content .flex.items-center.gap-3 > :last-child {
+  min-width: 0;
+}
+
+.kvie-settings-page .grid > * {
+  min-width: 0;
+}
+
+.kvie-settings-page code,
+.kvie-settings-page input {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kvie-sessions-page {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  max-width: 1320px;
+}
+
+.kvie-sessions-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  margin-bottom: 24px !important;
+}
+
+.kvie-session-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  min-width: 0;
+  height: 44px;
+  padding-inline: 14px;
+}
+
+.kvie-session-search-icon {
+  position: static !important;
+  inset: auto !important;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  transform: none !important;
+  pointer-events: none;
+}
+
+.kvie-session-search-input {
+  display: block;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 42px;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  line-height: 20px;
+}
+
+.kvie-session-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  line-height: 20px;
+}
+
+.kvie-empty-sessions {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 1160px;
+  height: clamp(320px, 38vh, 420px);
+  min-height: 320px;
+  margin: auto;
+  padding: 40px 28px;
+  text-align: center;
+}
+
+.kvie-empty-sessions > svg {
+  display: block;
+  flex: 0 0 auto;
+  margin-inline: auto;
+}
+
+.kvie-empty-sessions h3,
+.kvie-empty-sessions p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.kvie-empty-sessions p {
+  max-width: 520px;
+  font-size: 14px;
+}
+
+.workspace-heading {
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 24px;
+  margin: 0 !important;
+}
+
+.workspace-title {
+  max-width: 100%;
+  font-size: clamp(1.8rem, 3.2vw, 2.8rem);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+
+.workspace-heading > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-word-count {
+  flex: 0 0 auto;
+  min-width: 82px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(18, 18, 28, 0.72);
+}
+
+.workspace-document {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: clamp(360px, 45vh, 620px);
+  max-height: min(62vh, 760px);
+  overflow: hidden;
+  padding: 16px 20px 18px;
+  border-radius: 24px;
+}
+
+.workspace-toolbar {
+  flex: 0 0 auto;
+  min-height: 38px;
+  margin: 0 0 8px !important;
+  padding-bottom: 10px;
+}
+
+.workspace-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 180px;
+  max-height: none !important;
+  padding: 12px 4px 10px;
+  font-size: clamp(1rem, 1.55vw, 1.35rem);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.workspace-controls {
+  flex: 0 0 auto;
+  gap: 12px;
+  margin: 0 !important;
+  padding: 2px 0 4px;
+}
+
+.workspace-mic-button {
+  width: 76px;
+  height: 76px;
+}
+
+.workspace-action-list {
+  max-width: 100%;
+  gap: 8px;
+}
+
+.workspace-hint {
+  max-width: 100%;
+  margin: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+@media (max-width: 767px) {
+  .kvie-page-content {
+    padding-inline: 4px;
+  }
+
+  .kvie-empty-sessions {
+    height: 320px;
+    min-height: 320px;
+    padding: 32px 18px;
+  }
+
+  .kvie-sessions-toolbar {
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .kvie-session-count {
+    align-self: flex-start;
+  }
+
+  .workspace-shell {
+    gap: 14px;
+    padding: 8px 4px 20px;
+  }
+
+  .workspace-heading {
+    align-items: center;
+    gap: 10px;
+  }
+
+  .workspace-title {
+    font-size: clamp(1.5rem, 7vw, 2.15rem);
+  }
+
+  .kvie-settings-page .flex.items-center.gap-2,
+  .kvie-settings-page .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+  }
+
+  .workspace-word-count {
+    min-width: 62px;
+    padding: 6px 9px;
+  }
+
+  .workspace-document {
+    min-height: 280px;
+    max-height: none;
+    padding: 13px 14px 14px;
+    border-radius: 20px;
+  }
+
+  .workspace-editor {
+    min-height: 160px;
+    padding: 14px 2px 8px;
+    font-size: 1rem;
+  }
+
+  .workspace-controls {
+    gap: 10px;
+  }
+
+  .workspace-mic-button {
+    width: 68px;
+    height: 68px;
+  }
+}
+
+@media (max-height: 720px) and (min-width: 768px) {
+  .workspace-shell {
+    gap: 12px;
+    padding-top: 4px;
+  }
+
+  .workspace-document {
+    min-height: 260px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .workspace-editor {
+    min-height: 140px;
+    padding-top: 12px;
+  }
+
+  .workspace-controls {
+    gap: 8px;
+  }
+
+  .workspace-mic-button {
+    width: 64px;
+    height: 64px;
+  }
+}

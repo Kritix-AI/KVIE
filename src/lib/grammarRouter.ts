@@ -156,11 +156,24 @@ export class TokenEngine {
 }
 
 // ──────────────── Tier 2: Sentence Engine (Grammar, Structure & Tense) ────────────────
+// Words that look like they take the other article but don't ("an hour",
+// "a university") — without these the rules corrupt correct English on every
+// dictation.
+const A_EXCEPTIONS = /^(uni|use|us|user|used|useful|useless|usual|usually|one|once|euro|european|eulogy|utensil|unit|united|university|universal|universe|ubiquitous|ukrainian|unicorn|union|unique)/i
+const AN_EXCEPTIONS = /^(hour|hourly|honest|honestly|honor|honour|honorable|honourable|heir|herb|mba|fbi|honorarium)/i
+
 export class SentenceEngine {
-  private static GRAMMAR_RULES: Array<{ pattern: RegExp; replacement: string | ((match: string, ...args: any[]) => string) }> = [
-    // Articles: an before vowels, a before consonants
-    { pattern: /\b(a)\s+([aeiou][a-z]+)\b/gi, replacement: 'an $2' },
-    { pattern: /\b(an)\s+([bcdfghjklmnpqrstvwxyz][a-z]+)\b/gi, replacement: 'a $2' },
+  private static GRAMMAR_RULES: Array<{ pattern: RegExp; replacement: string | ((substring: string, ...args: any[]) => string) }> = [
+    // Articles: an before vowel sounds, a before consonant sounds — with
+    // exception lists so correct text is never rewritten.
+    {
+      pattern: /\ba\s+([aeiou][a-zA-Z]*)\b/gi,
+      replacement: (substring: string, word: string) => (A_EXCEPTIONS.test(word) ? substring : `an ${word}`),
+    },
+    {
+      pattern: /\ban\s+([bcdfghjklmnpqrstvwxyz][a-zA-Z]*)\b/gi,
+      replacement: (substring: string, word: string) => (AN_EXCEPTIONS.test(word) ? substring : `a ${word}`),
+    },
     // Prepositions
     { pattern: /\binterested\s+on\b/gi, replacement: 'interested in' },
     { pattern: /\bcongratulations\s+for\b/gi, replacement: 'congratulations on' },
@@ -180,17 +193,12 @@ export class SentenceEngine {
     let result = text
 
     for (const rule of SentenceEngine.GRAMMAR_RULES) {
-      result = result.replace(rule.pattern, rule.replacement)
+      result = result.replace(rule.pattern, rule.replacement as string)
     }
 
-    // Sentence-boundary capitalization & spacing
-    const sentences = result.split(/(?<=[.!?\n])\s+/).map(sentence => {
-      const trimmed = sentence.trim()
-      if (!trimmed) return ''
-      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
-    })
-
-    return sentences.filter(Boolean).join(' ')
+    // Sentence-boundary capitalization, preserving the original whitespace and
+    // newlines (the previous split+join collapsed multi-line text into one line).
+    return result.replace(/(^|[.!?]\s+|\n\s*)([a-z])/g, (_match, prefix: string, letter: string) => prefix + letter.toUpperCase())
   }
 
   /**
@@ -234,8 +242,14 @@ export class FinalEditor {
 
     // Normalize whitespace around punctuation
     result = result.replace(/\s+([,.:;?!])/g, '$1')
-    result = result.replace(/([,.:;?!])([a-zA-Z])/g, '$1 $2')
-    result = result.replace(/\s+/g, ' ').trim()
+    result = result.replace(/([,.:;?!])([a-zA-Z])/g, (match, punct: string, letter: string) => {
+      // A period followed by a lowercase letter is part of an abbreviation or
+      // domain ("e.g.", "node.js") — never split those.
+      if (punct === '.' && letter === letter.toLowerCase()) return match
+      return `${punct} ${letter}`
+    })
+    // Collapse runs of spaces/tabs but PRESERVE newlines.
+    result = result.replace(/[^\S\n]+/g, ' ').trim()
 
     // Ensure sentence ending punctuation if >= 3 words
     const words = result.split(' ')

@@ -160,7 +160,7 @@ class AudioEmotionDetector:
                         }.get(label, "neutral")
                         neural_preds[mapped_label] = score
             except Exception as e:
-                print(f"[AudioEmotionDetector] Neural pipeline fallback: {e}", flush=True)
+                print(f"[AudioEmotionDetector] Neural pipeline fallback ({type(e).__name__})", flush=True)
 
         # 2. Acoustic Feature Rules across 9 Emotion Categories
         rms = features["rms_mean"]
@@ -232,7 +232,13 @@ class AudioEmotionDetector:
             sample_rate: Sample rate (default 16000 Hz).
             reset_history: If True, clears sliding window history (for new utterances).
         """
+        if not isinstance(pcm_bytes, (bytes, bytearray, memoryview)):
+            return "neutral"
+        if not isinstance(sample_rate, int) or not 8_000 <= sample_rate <= 48_000:
+            return "neutral"
         if not pcm_bytes or len(pcm_bytes) < 3200:
+            return "neutral"
+        if len(pcm_bytes) > sample_rate * 2 * 30:
             return "neutral"
 
         try:
@@ -260,7 +266,7 @@ class AudioEmotionDetector:
             return smoothed_emotion
 
         except Exception as e:
-            print(f"[AudioEmotionDetector] Error in speech emotion detection: {e}", flush=True)
+            print(f"[AudioEmotionDetector] Speech emotion detection failed ({type(e).__name__})", flush=True)
             return "neutral"
 
 

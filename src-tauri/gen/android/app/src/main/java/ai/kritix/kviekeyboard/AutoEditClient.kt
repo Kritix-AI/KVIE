@@ -3,27 +3,10 @@ package ai.kritix.kviekeyboard
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 object AutoEditClient {
 
     private var smolLMEngine: SmolLMEngine? = null
-
-    private val endpoints = listOf(
-        "http://127.0.0.1:8765/api/autoedit",  // USB reverse proxy & on-device
-        "http://10.0.2.2:8765/api/autoedit",   // Emulator host routing
-        "http://10.0.3.2:8765/api/autoedit"   // Genymotion emulator host routing
-    )
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(400, TimeUnit.MILLISECONDS)
-        .readTimeout(800, TimeUnit.MILLISECONDS)
-        .build()
 
     fun init(context: Context) {
         if (smolLMEngine == null) {
@@ -31,36 +14,15 @@ object AutoEditClient {
         }
     }
 
-    suspend fun refine(text: String, context: Context? = null): String = withContext(Dispatchers.IO) {
+    suspend fun refine(text: String, context: Context? = null): String = withContext(Dispatchers.Default) {
         if (text.isBlank()) return@withContext text
 
         if (context != null && smolLMEngine == null) {
             init(context)
         }
 
-        // 1. Try PC / Local Server backend with ultra-fast probe
-        val body = JSONObject().put("text", text).toString()
-            .toRequestBody("application/json".toMediaType())
-
-        for (url in endpoints) {
-            try {
-                val request = Request.Builder().url(url).post(body).build()
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val json = JSONObject(response.body?.string().orEmpty())
-                        val refined = json.optString("refined_text", "")
-                        if (refined.isNotBlank()) {
-                            return@withContext refined
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // Try next endpoint
-            }
-        }
-
-        // 2. On-Device Instant SmolLM2 Engine Execution
-        val onDevice = smolLMEngine?.refineText(text, context = null)
-        return@withContext onDevice ?: text
+        // Android polishing stays on the Android engine; never send text to the
+        // Windows Python/Ollama service or its model.
+        return@withContext smolLMEngine?.refineText(text, context = null) ?: text
     }
 }

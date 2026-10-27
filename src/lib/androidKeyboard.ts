@@ -14,6 +14,7 @@ declare global {
       getAccentColor?: () => string
       isMicPermissionGranted?: () => boolean
       isKeyboardEnabled?: () => boolean
+      startFloatingMic?: () => boolean
       getRecordedSessions?: () => string
       recordSession?: (text: string, targetApp: string) => void
       clearRecordedSessions?: () => void
@@ -97,6 +98,15 @@ export const isAndroidKeyboardEnabled = (): boolean => {
     return window.AndroidKeyboardBridge?.isKeyboardEnabled?.() ?? false
   } catch {
     return false
+  }
+}
+
+export const startAndroidFloatingMic = (): boolean | null => {
+  try {
+    return window.AndroidKeyboardBridge?.startFloatingMic?.() ?? null
+  } catch (e) {
+    console.warn('AndroidKeyboardBridge.startFloatingMic failed', e)
+    return null
   }
 }
 

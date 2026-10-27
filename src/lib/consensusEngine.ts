@@ -50,11 +50,13 @@ function tokenize(text: string): string[] {
 
 function findBestMatch(word: string, candidates: string[], preferred?: string): { word: string; dist: number } {
   let best = word
-  let bestDist = 0
+  let bestDist = Infinity
   for (const c of candidates) {
     if (c.length < 2) continue
     const d = levenshtein(word.toLowerCase(), c.toLowerCase())
-    if (d < bestDist || bestDist === 0) {
+    // Distance-ordered selection: the old `bestDist = 0` init accepted every
+    // candidate unconditionally, so iteration order — not distance — decided.
+    if (d < bestDist) {
       bestDist = d
       best = c
     }
@@ -154,7 +156,7 @@ export function consensusReport(transcriptions: string[]): ConsensusReport {
     const unique = [...new Set(matched.map(w => w.toLowerCase()))]
     return {
       word,
-      confidence: matched.length > 0 ? matched.length / transcriptions.length : 1,
+      confidence: matched.length > 0 ? matched.length / transcriptions.length : 0,
       alternatives: unique.filter(w => !isWordMatch(w, word)),
     }
   })

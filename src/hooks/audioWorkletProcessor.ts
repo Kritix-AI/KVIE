@@ -1,8 +1,8 @@
 /**
  * AudioWorklet processor for KVIE voice capture.
  *
- * Runs off-main-thread at 16 kHz mono PCM, delivering 512-sample chunks
- * (32 ms @ 16 kHz) to the main thread via MessagePort. This replaces
+ * Runs off-main-thread, delivering 512-sample mono PCM chunks to the main
+ * thread via MessagePort. This replaces
  * the deprecated ScriptProcessorNode, eliminating main-thread jitter
  * and cutting audio capture latency from ~64 ms to ~32 ms.
  */
@@ -17,54 +17,10 @@ export interface ProcessorOptions {
 }
 
 const TARGET_SAMPLE_RATE = 16000
-const CHUNK_SIZE = 512
-
-export function createProcessorCode(): string {
-  return `
-class KVIEAudioProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super()
-    this._buffer = new Float32Array(CHUNK_SIZE)
-    this._bufferIndex = 0
-  }
-
-  process(inputs) {
-    const input = inputs[0]
-    if (!input || !input[0] || input[0].length === 0) {
-      return true
-    }
-
-    const channelData = input[0]
-    let srcIndex = 0
-
-    while (srcIndex < channelData.length) {
-      const remaining = CHUNK_SIZE - this._bufferIndex
-      const toCopy = Math.min(remaining, channelData.length - srcIndex)
-
-      this._buffer.set(channelData.subarray(srcIndex, srcIndex + toCopy), this._bufferIndex)
-      this._bufferIndex += toCopy
-      srcIndex += toCopy
-
-      if (this._bufferIndex >= CHUNK_SIZE) {
-        const pcm16 = new Int16Array(CHUNK_SIZE)
-        for (let i = 0; i < CHUNK_SIZE; i++) {
-          const s = Math.max(-1, Math.min(1, this._buffer[i]))
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
-        }
-        this.port.postMessage({ type: 'pcm', samples: pcm16 })
-        this._bufferIndex = 0
-      }
-    }
-
-    return true
-  }
-}
-
-self.registerProcessor('kvie-audio-processor', KVIEAudioProcessor)
-`
-}
+const PROCESSOR_NAME = 'kvie-audio-processor'
 
 export interface WorkletHandle {
+  onAudioData: ((data: ArrayBuffer) => void) | null
   disconnect: () => void
   stream: MediaStream
   context: AudioContext
@@ -72,27 +28,42 @@ export interface WorkletHandle {
 
 export async function startAudioWorklet(
   stream: MediaStream,
+  onAudioData?: (data: ArrayBuffer) => void,
 ): Promise<WorkletHandle> {
   const context = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE })
 
-  // If the hardware can't do 16 kHz, we'll resample in the worklet
-  // but the worklet still operates at CHUNK_SIZE of the actual rate
+  // If the browser can't provide a 16 kHz context, resample the captured
+  // chunks on the main thread before sending them to the STT service.
   const actualRate = context.sampleRate
 
-  const blob = new Blob([createProcessorCode()], { type: 'application/javascript' })
-  const url = URL.createObjectURL(blob)
-  await context.audioWorklet.addModule(url)
-  URL.revokeObjectURL(url)
+  // Load a packaged same-origin module. Blob modules are blocked by the
+  // desktop CSP and can leave addModule without a registered processor.
+  const moduleUrl = new URL(
+    `${import.meta.env.BASE_URL}kvie-audio-processor.js`,
+    window.location.origin,
+  )
+  try {
+    await context.audioWorklet.addModule(moduleUrl.href)
+  } catch (error) {
+    await context.close().catch(() => {})
+    throw new Error(
+      `Could not load the KVIE audio processor (${moduleUrl.pathname}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
 
   const source = context.createMediaStreamSource(stream)
-  const processor = new AudioWorkletNode(context, 'kvie-audio-processor', {
+  const processor = new AudioWorkletNode(context, PROCESSOR_NAME, {
     numberOfInputs: 1,
-    numberOfOutputs: 0,
+    numberOfOutputs: 1,
     channelCount: 1,
+    outputChannelCount: [1],
   })
+  const mute = context.createGain()
+  mute.gain.value = 0
 
   source.connect(processor)
-  processor.connect(context.destination)
+  processor.connect(mute)
+  mute.connect(context.destination)
 
   // Resample if needed — the worklet outputs at actualRate,
   // but the STT service expects 16000 Hz
@@ -101,36 +72,61 @@ export async function startAudioWorklet(
     resampleRatio = TARGET_SAMPLE_RATE / actualRate
   }
 
-  processor.port.onmessage = (event: MessageEvent<ProcessorMessage>) => {
-    if (event.data.type === 'pcm') {
-      const { samples } = event.data
-      if (resampleRatio === 1) {
-        // Already at target rate — send directly
-        source.onAudioData?.(samples)
-      } else {
-        // Resample by simple averaging
-        const outputLength = Math.round(samples.length / resampleRatio)
-        const output = new Int16Array(outputLength)
-        const input = new Float32Array(samples.buffer, samples.byteOffset, samples.length)
-        for (let i = 0; i < outputLength; i++) {
-          const start = Math.floor(i * resampleRatio)
-          const end = Math.min(Math.floor((i + 1) * resampleRatio), input.length)
-          let sum = 0
-          for (let j = start; j < end; j++) sum += input[j]
-          output[i] = Math.round(sum / (end - start))
-        }
-        source.onAudioData?.(output)
-      }
-    }
-  }
-
-  return {
+  const handle: WorkletHandle = {
+    // Attach the sender before connecting the source. A suspended context can
+    // otherwise start producing frames before the caller has installed it.
+    onAudioData: onAudioData ?? null,
     disconnect() {
       processor.disconnect()
+      mute.disconnect()
       source.disconnect()
       context.close().catch(() => {})
     },
     stream,
     context,
   }
+
+  processor.port.onmessage = (event: MessageEvent<ProcessorMessage>) => {
+    if (event.data.type === 'pcm') {
+      const { samples } = event.data
+      if (resampleRatio === 1) {
+        // Already at target rate — send directly
+        handle.onAudioData?.(samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength) as ArrayBuffer)
+      } else {
+        // Downsample by simple averaging with the correct input/output ratio.
+        const outputLength = Math.round(samples.length * resampleRatio)
+        const output = new Int16Array(outputLength)
+        for (let i = 0; i < outputLength; i++) {
+          const start = Math.floor(i / resampleRatio)
+          const end = Math.max(start + 1, Math.min(Math.floor((i + 1) / resampleRatio), samples.length))
+          let sum = 0
+          for (let j = start; j < end; j++) sum += samples[j]
+          output[i] = Math.round(sum / Math.max(end - start, 1))
+        }
+        handle.onAudioData?.(output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength) as ArrayBuffer)
+      }
+    }
+  }
+
+  // Global hotkeys are not browser user gestures. Chromium may therefore
+  // create an AudioContext in the suspended state even after getUserMedia has
+  // granted microphone access. Explicitly resume it before reporting success.
+  try {
+    if (context.state !== 'running') await context.resume()
+  } catch (error) {
+    processor.disconnect()
+    mute.disconnect()
+    source.disconnect()
+    await context.close().catch(() => {})
+    throw new Error(`Could not start microphone audio capture: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (context.state !== 'running') {
+    processor.disconnect()
+    mute.disconnect()
+    source.disconnect()
+    await context.close().catch(() => {})
+    throw new Error('Microphone audio capture is suspended. Click the mic once, then retry the ` key.')
+  }
+
+  return handle
 }

@@ -14,8 +14,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: false,
-    host: host || '0.0.0.0',
+    strictPort: true,
+    host: host || '127.0.0.1',
     hmr: host
       ? {
           protocol: 'ws',
@@ -24,8 +24,20 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      // Don't watch src-tauri or android build artifacts to prevent infinite reload loops
-      ignored: ['**/src-tauri/**', '**/Backend/**'],
+      // Backend and Tauri write runtime data while the frontend is open.
+      // SQLite WAL/SHM changes on each mic session must not reload the page
+      // and interrupt capture.
+      ignored: [
+        '**/src-tauri/**',
+        '**/Backend/**',
+        '**/Data/**',
+        '**/*.sqlite',
+        '**/*.sqlite-*',
+        '**/*.sqlite3',
+        '**/*.sqlite3-*',
+        '**/*.db-wal',
+        '**/*.db-shm',
+      ],
     },
   },
   build: {

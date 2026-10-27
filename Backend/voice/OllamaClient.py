@@ -8,41 +8,57 @@ import os
 from typing import Optional, List, Dict, Any
 from dotenv import dotenv_values
 
-env = dotenv_values(".env")
+# Resolve .env relative to the project root (Backend/voice/ → two levels up),
+# not the process working directory.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_HERE))
+env = dotenv_values(os.path.join(_PROJECT_ROOT, ".env"))
 
 OLLAMA_LOCAL_URL = env.get("OLLAMA_LOCAL_URL", "http://localhost:11434/api")
 OLLAMA_DEFAULT_MODEL = env.get("OLLAMA_DEFAULT_MODEL", "phi3:mini")
 OLLAMA_TIMEOUT = int(env.get("OLLAMA_TIMEOUT", "60"))
-# Keep the local model's KV-cache bounded.  An inherited 1M-token context can
-# make even phi3:mini request tens of GB during llama-server startup.
+# Keep the local model's KV-cache bounded.
 OLLAMA_CONTEXT_LENGTH = int(env.get("OLLAMA_CONTEXT_LENGTH", "4096"))
+
+_ALLOWED_OLLAMA_HOSTS = {"localhost", "127.0.0.1"}
+
+
+def _validate_ollama_url(url: str) -> str:
+    """Ensure the Ollama URL only points to loopback to prevent SSRF."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.hostname not in _ALLOWED_OLLAMA_HOSTS:
+            raise ValueError(f"Ollama URL host '{parsed.hostname}' is not allowed; must be localhost or 127.0.0.1")
+    except Exception as exc:
+        raise ValueError(f"Invalid OLLAMA_LOCAL_URL: {exc}") from exc
+    return url.rstrip("/")
 
 
 class OllamaLocalClient:
     """Client for local Ollama server API"""
 
     def __init__(self, base_url: str = None, default_model: str = None):
-        self.base_url = (base_url or OLLAMA_LOCAL_URL).rstrip("/")
+        raw_url = base_url or OLLAMA_LOCAL_URL
+        self.base_url = _validate_ollama_url(raw_url)
         self.default_model = default_model or OLLAMA_DEFAULT_MODEL
         self.session = requests.Session()
 
     def _is_available(self) -> bool:
-        """Check if Ollama server is running"""
         try:
             resp = self.session.get(f"{self.base_url}/tags", timeout=3)
             return resp.status_code == 200
-        except:
+        except Exception:
             return False
 
     def list_models(self) -> List[str]:
-        """List available models on local Ollama"""
         try:
             resp = self.session.get(f"{self.base_url}/tags", timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 return [m.get("name", "") for m in data.get("models", [])]
             return []
-        except:
+        except Exception:
             return []
 
     def chat(

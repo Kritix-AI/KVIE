@@ -71,7 +71,7 @@
 
 Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio stream to external servers, **KVIE executes entirely on your hardware**:
 - **Desktop (Windows & macOS)**: Tauri v2 + Rust core leveraging Win32 `WH_KEYBOARD_LL` and macOS `CGEventTap` for global hotkeys, Windows UI Automation (`IUIAutomation`) & macOS `AXUIElement` for surrounding text context, and local Whisper / Qwen2.5-1.5B models.
-- **Android Mobile**: High-performance native Kotlin input method (`InputMethodService`), accessibility automation (`AccessibilityService`), floating mic overlay (`WindowManager`), and on-device **SmolLM2-360M** + **NVIDIA Parakeet ONNX** models.
+- **Android Mobile**: Native Kotlin input method (`InputMethodService`), accessibility automation (`AccessibilityService`), floating mic overlay (`WindowManager`), and the speech recognition provider installed on the device. This build does not bundle Android Whisper, Parakeet, or SmolLM inference runtimes; text cleanup uses local rules, and Android never calls the desktop Python/Ollama services.
 
 ---
 
@@ -79,12 +79,12 @@ Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio str
 
 | Feature / Architecture Layer | Wispr Flow | Gboard / Samsung | Kritix (KVIE) |
 | :--- | :---: | :---: | :---: |
-| **Complete Local & Offline Execution** | ❌ (Cloud-only) | ⚠️ (Basic offline) | ✅ **100% Private On-Device Models** |
+| **Local Speech Recognition** | ❌ (Cloud-only) | ⚠️ (Device-dependent) | ✅ **Desktop Whisper; Android device speech provider** |
 | **System-Wide Global Hotkey (`Ctrl+Alt+R` / `⌘+⌥+R`)** | ✅ | ❌ | ✅ **Windows (`WH_KEYBOARD_LL`) & macOS (`CGEventTap`)** |
 | **Cross-App Auto-Inject Everywhere** | ✅ | ❌ | ✅ **Differential `eraseAndInject` + UI Automation** |
 | **Surrounding Text Context Awareness** | ✅ | ❌ | ✅ **0ms OS Accessibility Reader** |
 | **Multi-Tier Grammar Router Pipeline** | ❌ | ❌ | ✅ **Token (0ms) + Sentence + Paragraph & Final** |
-| **AI LLM Post-Processing (Tone & Polish)** | ✅ | ❌ | ✅ **SmolLM2-360M & Qwen2.5-1.5B (Formal, Casual, Shorten)** |
+| **LLM Post-Processing (Tone & Polish)** | ✅ | ❌ | ❌ **Android uses rule-based cleanup; no local LLM is bundled** |
 | **Per-App Automatic Tone Adaptation** | ❌ | ❌ | ✅ **Auto-detects WhatsApp ➔ Casual vs. Gmail ➔ Formal** |
 | **Spoken Voice Editing Commands** | ❌ | ❌ | ✅ **"Delete that", "Clear all", "New line", "Make formal"** |
 | **Next-Gen Android QWERTY Keyboard** | ❌ | ✅ | ✅ **Full QWERTY, Number Row (`123`), Alt-Symbols** |
@@ -172,13 +172,13 @@ Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio str
                    │                                                                       │
                    ▼                                                                       ▼
     ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
-    │  Whisper.cpp / Large-v3 Turbo │                                       │  NVIDIA Parakeet ONNX / STT   │
+    │  Whisper.cpp / Large-v3 Turbo │                                       │  Android system recognizer   │
     │  On-Device Speech-to-Text     │                                       │  Realtime Audio Streaming     │
     └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
                    │                                                                       │
                    ▼                                                                       ▼
     ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
-    │ Multi-Tier Grammar Router     │                                       │  SmolLM2-360M On-Device LLM  │
+    │ Multi-Tier Grammar Router     │                                       │  Rule-Based Text Cleanup     │
     │ Token -> Sentence -> Paragraph│                                       │  Voice Commands & AI Polish   │
     └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
                    │                                                                       │

@@ -17,6 +17,11 @@
 *.pfx
 secrets.*
 credentials.*
+keystore.properties
+**/keystore.properties
+**/keystore.properties.*
+*.jks
+*.keystore
 
 # -----------------------------------------------------------------------------
 # 2. Python — virtualenvs, caches, compiled
@@ -62,6 +67,11 @@ dist/
 dist-electron/
 src-tauri/target/
 target/
+**/.gradle/
+.gradle/
+**/.gradle-user-home/
+**/.gradle-project-cache/
+**/.android-user-home/
 .cache/
 .vite/
 .parcel-cache/
@@ -159,6 +169,9 @@ Data/speech.*.mp3
 Data/VoiceCloning/samples/*.wav
 Data/VoiceCloning/samples/*.mp3
 Data/VoiceCloning/samples/*.flac
+Data/*.wav
+Data/*.sqlite3-shm
+Data/*.sqlite3-wal
 Data/audio_cache/
 Data/audio_cache/**
 Data/VoiceCloning/cache/

@@ -1,0 +1,81 @@
+.kvie-sidebar {
+  box-sizing: border-box;
+  flex: 0 0 256px;
+  width: 256px;
+  min-width: 0;
+  height: 100%;
+  padding: 12px 14px 16px;
+}
+
+.kvie-sidebar.kvie-sidebar--collapsed {
+  flex-basis: 80px;
+  width: 80px;
+  padding-inline: 10px;
+}
+
+.kvie-sidebar:not(.kvie-sidebar--collapsed) {
+  align-items: stretch;
+}
+
+.kvie-sidebar-header {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  min-height: 58px;
+  margin: 0 0 18px;
+  padding: 0 8px;
+}
+
+.kvie-sidebar-header > div {
+  min-width: 0;
+}
+
+.kvie-sidebar-nav {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kvie-sidebar-item {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  padding-inline: 12px;
+  line-height: 1.25;
+}
+
+.kvie-sidebar--collapsed .kvie-sidebar-header {
+  justify-content: center;
+  margin-bottom: 18px;
+  padding-inline: 0;
+}
+
+.kvie-sidebar--collapsed .kvie-sidebar-nav {
+  align-items: center;
+}
+
+.kvie-sidebar--collapsed .kvie-sidebar-item {
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  justify-content: center;
+}
+
+.kvie-sidebar-runtime {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  margin-top: auto;
+  padding: 13px 14px;
+  overflow-wrap: anywhere;
+}
+
+.kvie-sidebar-runtime > p,
+.kvie-sidebar-runtime > div {
+  min-width: 0;
+}
+
+.kvie-sidebar--collapsed .kvie-sidebar-runtime {
+  padding: 12px 8px;
+}

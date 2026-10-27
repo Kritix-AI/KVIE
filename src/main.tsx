@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import FloatingWindowApp from './FloatingWindowApp'
 import './styles/global.css'
+import './styles/sidebar.css'
+import './styles/workspace.css'
 
 const isFloatingWindow = window.location.search.includes('window=floating') || window.location.hash === '#floating'
 

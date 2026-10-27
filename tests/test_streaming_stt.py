@@ -42,6 +42,7 @@ def test_engine_can_receive_chunks_from_another_thread():
         transcriber=fake_transcriber,
         on_event=seen.append,
     )
+    engine.start()
     producer = threading.Thread(target=lambda: engine.push_pcm(b"b" * 16000))
     producer.start()
     producer.join()
@@ -50,7 +51,8 @@ def test_engine_can_receive_chunks_from_another_thread():
 
     partials = [event for event in seen if event.kind == "partial"]
     assert partials
-    assert partials[0].confidence == 0.9
+    # Compact partial events intentionally omit confidence metadata.
+    assert partials[0].text == "hello"
     assert partials[0].language == ""
 
 

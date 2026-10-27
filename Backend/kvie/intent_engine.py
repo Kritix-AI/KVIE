@@ -24,7 +24,13 @@ class IntentDecision:
 class IntentEngine:
     """Classifies safe, high-signal editing phrases without model latency."""
 
-    _correction = re.compile(r"^(?:actually|wait|sorry|no),?\s+(?:replace|change|make it)(?:\s+with)?\s+(.+)$", re.I)
+    # A correction starts with a trigger word, optionally a second filler
+    # ("no wait ..."), then an actionable replacement instruction.
+    _correction_trigger = re.compile(r"^(?:actually|wait|sorry|no)[, ]+\s*(?:(?:wait|well|um|uh)[, ]+\s*)?(.+)$", re.I)
+    # The replacement instruction itself: verb + optional pronoun referent +
+    # optional connector, so "replace it with better wording" captures
+    # "better wording" — not "it with better wording".
+    _correction_body = re.compile(r"^(?:replace|change|make|set|swap)\s+(?:(?:it|that|this)\s+)?(?:with\s+|to\s+|as\s+)?(.+)$", re.I)
     _insert = re.compile(r"^insert\s+(.+?)\s+after\s+(?:the\s+)?(first|last|\d+)(?:st|nd|rd|th)?\s+sentence\.?$", re.I)
     _translate = re.compile(r"^(?:translate|write this)\s+(?:in|to)\s+([a-zA-Z -]+)$", re.I)
     _semantic_replace = re.compile(r"^(?:replace|change)\s+(?:the\s+)?(?:sentence\s+)?(?:about|containing)\s+(.+?)\s+(?:with|to)\s+(.+)$", re.I)
@@ -44,9 +50,15 @@ class IntentEngine:
         if lower in {"stop", "cancel", "never mind", "nevermind"}:
             return IntentDecision("ignore", reason="explicit cancellation")
 
-        correction = self._correction.match(normalized)
+        correction = self._correction_trigger.match(normalized)
         if correction and last_sentence is not None:
-            return IntentDecision("replace_sentence", correction.group(1).rstrip("."), .98, last_sentence, reason="correction phrase")
+            body = self._correction_body.match(correction.group(1).strip())
+            if body:
+                content = body.group(1).strip().rstrip(".")
+                if content:
+                    return IntentDecision("replace_sentence", content, .98, last_sentence, reason="correction phrase")
+            # A trigger word without an actionable instruction ("sorry about
+            # that") is dictation, not a correction — fall through to append.
 
         if lower.startswith("delete the last sentence") and last_sentence is not None:
             return IntentDecision("delete_sentence", target_sentence=last_sentence, reason="last sentence deletion")

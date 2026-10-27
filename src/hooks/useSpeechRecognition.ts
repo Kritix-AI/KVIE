@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isTauri } from '@tauri-apps/api/core'
 import { mergeRollingText } from '../lib/incrementalTypingEngine'
 
 interface SpeechRecognitionEventLike extends Event { results: SpeechRecognitionResultList; resultIndex: number }
@@ -22,7 +23,9 @@ export const useSpeechRecognition = (language = 'en-IN') => {
   const [state, setState] = useState({ isListening: false, isSupported: false, transcript: '', interimTranscript: '', latestSegment: '', error: null as string | null })
 
   useEffect(() => {
-    // Request microphone permission upfront in Chromium Webview
+    // Warm the mic permission in plain-browser runs only — the desktop app
+    // uses the local streaming voice hook and should not prompt at startup.
+    if (isTauri()) return
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         stream.getTracks().forEach(track => track.stop())
@@ -71,7 +74,13 @@ export const useSpeechRecognition = (language = 'en-IN') => {
     }
     recognition.onend = () => {
       if (restartRef.current) {
-        try { recognition.start() } catch { /* browser is still closing the previous session */ }
+        // Brief backoff so a persistently failing recognition service doesn't
+        // tight-loop start/stop cycles.
+        window.setTimeout(() => {
+          if (restartRef.current) {
+            try { recognition.start() } catch { /* browser is still closing the previous session */ }
+          }
+        }, 300)
       } else setState(current => ({ ...current, isListening: false, interimTranscript: '' }))
     }
     recognitionRef.current = recognition
@@ -92,5 +101,5 @@ export const useSpeechRecognition = (language = 'en-IN') => {
   }, [])
   const clearTranscript = useCallback(() => setState(current => ({ ...current, transcript: '', interimTranscript: '', error: null })), [])
 
-  return { ...state, startListening, stopListening, clearTranscript }
+  return { ...state, audioLevel: 0, startListening, stopListening, clearTranscript }
 }

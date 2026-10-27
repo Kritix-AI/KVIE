@@ -7,31 +7,38 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
-/**
- * Talks to the /autoedit endpoint on the KVIE backend (see the mobile
- * architecture doc — this is the same service the iOS extension needs
- * for its Qwen2.5-1.5B pass). Point BASE_URL at your deployed backend.
- *
- * Swap this out for an on-device llama.cpp/MLC-LLM call once that's
- * wired up — handleFinalTranscript() in the service doesn't need to
- * change, since it just awaits AutoEditClient.refine().
- */
 object AutoEditClient {
 
     private const val BASE_URL = "https://your-backend.example.com/autoedit"
-    private val client = OkHttpClient()
+    private const val MAX_INPUT_LENGTH = 4096
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
+        .build()
 
     suspend fun refine(text: String): String? = withContext(Dispatchers.IO) {
+        // Enforce HTTPS
+        if (!BASE_URL.startsWith("https://")) return@withContext null
+
+        // Cap input length to prevent large payload exfiltration
+        val safeText = text.take(MAX_INPUT_LENGTH)
+        if (safeText.isBlank()) return@withContext null
+
         try {
-            val body = JSONObject().put("text", text).toString()
+            val body = JSONObject().put("text", safeText).toString()
                 .toRequestBody("application/json".toMediaType())
             val request = Request.Builder().url(BASE_URL).post(body).build()
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
-                val json = JSONObject(response.body?.string().orEmpty())
-                json.optString("refined_text", text)
+                val responseBody = response.body?.string().orEmpty()
+                if (responseBody.length > MAX_INPUT_LENGTH * 2) return@withContext null
+                val json = JSONObject(responseBody)
+                json.optString("refined_text", text).take(MAX_INPUT_LENGTH)
             }
         } catch (e: Exception) {
             null // fall back to the Stage 1 text already committed

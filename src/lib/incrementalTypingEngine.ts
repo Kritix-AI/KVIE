@@ -1,4 +1,24 @@
-const MAX_ERASE_CHUNK = 200
+// Must match the Rust-side MAX_ERASE_COUNT — a single inject can never erase more.
+const MAX_ERASE_CHUNK = 500
+
+// Editors delete one grapheme cluster per Backspace (Word, Chromium, modern
+// Notepad) — counting UTF-16 code units would over-erase Hindi combining marks
+// and emoji, the core Hinglish use case.
+interface GraphemeSegmenter {
+  segment(text: string): Iterable<{ segment: string }>
+}
+
+const graphemeSegmenter: GraphemeSegmenter | undefined =
+  typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new (Intl as unknown as { Segmenter: new (locale: string, options: { granularity: string }) => GraphemeSegmenter }).Segmenter('en', { granularity: 'grapheme' })
+    : undefined
+
+const toGraphemes = (text: string): string[] => {
+  if (graphemeSegmenter) {
+    return Array.from(graphemeSegmenter.segment(text), segment => segment.segment)
+  }
+  return Array.from(text)
+}
 
 /**
  * KVIE Smart Incremental Typing & Overlap Analysis Engine
@@ -27,17 +47,16 @@ export const findWordOverlap = (leftText: string, rightText: string, maxWords = 
   const rightWords = rightText.trim().split(/\s+/).filter(Boolean)
   if (!leftWords.length || !rightWords.length) return 0
 
-  const leftClean = leftWords.map(normalizeWord).filter(Boolean)
-  const rightClean = rightWords.map(normalizeWord).filter(Boolean)
-  if (!leftClean.length || !rightClean.length) return 0
-
   let overlap = 0
-  const maxCheck = Math.min(leftClean.length, rightClean.length, maxWords)
+  const maxCheck = Math.min(leftWords.length, rightWords.length, maxWords)
 
   for (let size = maxCheck; size >= 1; size -= 1) {
-    const tail = leftClean.slice(-size).join(' ')
-    const head = rightClean.slice(0, size).join(' ')
-    if (tail === head) {
+    // Compare over normalized forms but count over RAW words: punctuation-only
+    // tokens (e.g. the Hindi danda) must keep the word indices aligned with the
+    // raw slices the callers perform.
+    const tail = leftWords.slice(-size).map(normalizeWord).join(' ')
+    const head = rightWords.slice(0, size).map(normalizeWord).join(' ')
+    if (tail && tail === head) {
       overlap = size
       break
     }
@@ -114,6 +133,27 @@ export const stripCommittedOverlap = (
   let remainder = incoming
   if (overlap > 0) {
     remainder = incomingWords.slice(overlap).join(' ').trim()
+    if (!remainder) {
+      // The overlap covered every incoming word, but the raw strings can
+      // still differ by trailing punctuation ("today" → "today.") — keep
+      // that suffix instead of silently dropping it.
+      const committedTailWords = committed.split(/\s+/).filter(Boolean)
+      const tailCount = Math.min(overlap, committedTailWords.length)
+      const committedTail = committedTailWords.slice(-tailCount).join(' ')
+      if (
+        committedTail.length > 0 &&
+        incoming.length > committedTail.length &&
+        incoming.startsWith(committedTail)
+      ) {
+        const extra = incoming.slice(committedTail.length)
+        const needsSpace =
+          committedText.length > 0 &&
+          !/[\s\n]$/.test(committedText) &&
+          !/^[.,!?;:]/.test(extra)
+        return { cleanText: needsSpace ? ` ${extra}` : extra, overlapWords: overlap }
+      }
+      return { cleanText: '', overlapWords: overlap }
+    }
   }
 
   if (!remainder) {
@@ -165,6 +205,17 @@ export class IncrementalTypingSession {
     this.lastProcessedLen = 0
   }
 
+  /** State before a delta — used to roll back when an inject is rejected. */
+  public snapshot(): { committedText: string; uncommittedInterim: string } {
+    return { committedText: this.committedText, uncommittedInterim: this.uncommittedInterim }
+  }
+
+  public restoreTo(state: { committedText: string; uncommittedInterim: string }): void {
+    this.committedText = state.committedText
+    this.uncommittedInterim = state.uncommittedInterim
+    this.lastProcessedLen = (this.committedText + this.uncommittedInterim).length
+  }
+
   public commitCurrent(): void {
     if (this.uncommittedInterim) {
       this.committedText = `${this.committedText}${this.uncommittedInterim}`
@@ -183,89 +234,78 @@ export class IncrementalTypingSession {
    */
   public processSegment(rawIncoming: string, isFinal: boolean): TypingDelta {
     const raw = rawIncoming.trim()
+    const previousInterim = this.uncommittedInterim
+
     if (!raw) {
+      if (isFinal && previousInterim) {
+        // The STT withdrew everything it had shown as interim — erase it from
+        // the target app instead of leaving orphaned text on screen.
+        const eraseCount = Math.min(toGraphemes(previousInterim).length, MAX_ERASE_CHUNK)
+        this.uncommittedInterim = ''
+        this.lastProcessedLen = this.committedText.length
+        return { eraseCount, appendText: '', committedText: this.committedText, uncommittedInterim: '' }
+      }
       return {
         eraseCount: 0,
         appendText: '',
         committedText: this.committedText,
-        uncommittedInterim: this.uncommittedInterim,
+        uncommittedInterim: previousInterim,
       }
     }
 
     // Step 1: Strip any tail overlap with committed text
     const { cleanText } = stripCommittedOverlap(this.committedText, raw)
 
-    if (!cleanText && !isFinal) {
+    if (previousInterim === cleanText && !isFinal) {
       return {
         eraseCount: 0,
         appendText: '',
         committedText: this.committedText,
-        uncommittedInterim: this.uncommittedInterim,
+        uncommittedInterim: previousInterim,
       }
     }
 
-    const previousInterim = this.uncommittedInterim
-    const targetInterim = cleanText
-
-    // ── GUARD: Never erase committed text ────────────────────────────
-    // If the incoming text is shorter than what's already committed + interim,
-    // it means the STT revised its output. We should NOT backspace into
-    // committed territory. Only update what's different in the interim.
-    const currentTypedLength = this.committedText.length + previousInterim.length
-    if (targetInterim.length < this.committedText.length && isFinal) {
-      // Final text is shorter than committed — STT revision.
-      // Only type the new committed portion, keep old committed intact.
-      const newCommittedPortion = targetInterim.slice(this.committedText.length)
-      if (newCommittedPortion.length > 0) {
-        this.committedText = targetInterim
-        this.uncommittedInterim = ''
-        return {
-          eraseCount: 0,
-          appendText: newCommittedPortion,
-          committedText: this.committedText,
-          uncommittedInterim: '',
-        }
-      }
-      // Nothing new to type
-      this.uncommittedInterim = ''
-      return {
-        eraseCount: 0,
-        appendText: '',
-        committedText: this.committedText,
-        uncommittedInterim: '',
-      }
-    }
-
-    if (previousInterim === targetInterim && !isFinal) {
-      return {
-        eraseCount: 0,
-        appendText: '',
-        committedText: this.committedText,
-        uncommittedInterim: this.uncommittedInterim,
-      }
-    }
-
-    // Step 2: Compute delta against uncommittedInterim ONLY (never touch committedText!)
+    // Step 2: Delta against uncommittedInterim ONLY (never touch committedText!)
+    // Counted in grapheme clusters so the erase count matches how editors
+    // actually delete text.
+    const previousGraphemes = toGraphemes(previousInterim)
+    const targetGraphemes = toGraphemes(cleanText)
     let commonPrefixLen = 0
-    const minLen = Math.min(previousInterim.length, targetInterim.length)
-    for (let i = 0; i < minLen; i++) {
-      if (previousInterim[i] === targetInterim[i]) {
-        commonPrefixLen++
+    const minLen = Math.min(previousGraphemes.length, targetGraphemes.length)
+    while (commonPrefixLen < minLen && previousGraphemes[commonPrefixLen] === targetGraphemes[commonPrefixLen]) {
+      commonPrefixLen += 1
+    }
+
+    const eraseNeeded = previousGraphemes.length - commonPrefixLen
+    if (eraseNeeded > MAX_ERASE_CHUNK) {
+      // A single inject cannot erase more than the Rust-side cap. Erase what we
+      // can and keep the engine state matching what will actually be on screen,
+      // so the next delta retries the remainder instead of desyncing.
+      const erasedRemainder = previousGraphemes.slice(0, commonPrefixLen + MAX_ERASE_CHUNK).join('')
+      if (isFinal) {
+        this.committedText = `${this.committedText}${erasedRemainder}`
+        this.uncommittedInterim = ''
       } else {
-        break
+        this.uncommittedInterim = erasedRemainder
+      }
+      this.lastProcessedLen = (this.committedText + this.uncommittedInterim).length
+      return {
+        eraseCount: MAX_ERASE_CHUNK,
+        appendText: '',
+        committedText: this.committedText,
+        uncommittedInterim: this.uncommittedInterim,
       }
     }
 
-    const rawEraseCount = previousInterim.length - commonPrefixLen
-    const eraseCount = Math.max(0, Math.min(rawEraseCount, MAX_ERASE_CHUNK))
-    const appendText = targetInterim.slice(commonPrefixLen)
+    const eraseCount = Math.max(0, eraseNeeded)
+    const appendText = targetGraphemes.slice(commonPrefixLen).join('')
 
     if (isFinal) {
       // Finalize this segment into committedText and reset uncommittedInterim
-      this.committedText = `${this.committedText}${targetInterim}`
+      this.committedText = `${this.committedText}${cleanText}`
       this.uncommittedInterim = ''
     } else {
-      this.uncommittedInterim = targetInterim
+      this.uncommittedInterim = cleanText
     }
 
     this.lastProcessedLen = (this.committedText + this.uncommittedInterim).length

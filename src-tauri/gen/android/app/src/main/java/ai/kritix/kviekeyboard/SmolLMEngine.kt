@@ -10,8 +10,8 @@ import java.io.File
  * SmolLM2-360M GGUF Inference Engine for Android.
  *
  * Two-tier architecture:
- * 1. Primary: native ggml inference via JNI (llama.cpp bindings) when bundled.
- * 2. Fallback: rule-based grammar / filler / punctuation polish (<1 ms, no model).
+ * 1. Optional: llama.cpp inference, only when native libraries are bundled.
+ * 2. Current fallback: rule-based grammar / filler / punctuation cleanup (no downloaded model).
  *
  * The engine never crashes if the native layer is missing; it logs a warning
  * and continues on the rule-based path.
@@ -20,12 +20,12 @@ class SmolLMEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "SmolLMEngine"
-        const val MODEL_FILE = "smollm2-360m-q4_k_m.gguf"
-        const val MODEL_REPO = "HuggingFaceTB/SmolLM2-360M-Instruct"
+        const val MODEL_FILE = "SmolLM2-360M-Instruct-Q4_K_M.gguf"
+        const val MODEL_REPO = "bartowski/SmolLM2-360M-Instruct-GGUF"
         const val MODEL_MIN_BYTES = 50L * 1024 * 1024
 
 
-        private val SENTENCE_PATTERN = Regex("""(?<=[.!?\n]\s*)([a-z])""")
+        private val SENTENCE_PATTERN = Regex("""([.!?\n]\s*)([a-z])""")
         private val PROPER_NOUNS = setOf(
             "monday","tuesday","wednesday","thursday","friday","saturday","sunday",
             "january","february","march","april","may","june","july","august",
@@ -89,7 +89,9 @@ class SmolLMEngine(private val context: Context) {
                 .replace(Regex("(?i)\\bi've\\b"), "I've")
                 .replace(Regex("(?i)\\bi'll\\b"), "I'll")
                 .replace(Regex("(?i)\\bi'd\\b"), "I'd")
-            result = SENTENCE_PATTERN.replace(result) { it.value.uppercase() }
+            result = SENTENCE_PATTERN.replace(result) {
+                it.groupValues[1] + it.groupValues[2].uppercase()
+            }
             val words = result.split(Regex("\\s+")).toMutableList()
             for (i in words.indices) {
                 val clean = words[i].lowercase().replace(Regex("[^a-zA-Z]"), "")
@@ -124,6 +126,10 @@ class SmolLMEngine(private val context: Context) {
 
     suspend fun ensureModelDownloaded(): Boolean = withContext(Dispatchers.IO) {
         if (isModelDownloaded) return@withContext true
+        if (!nativeReady) {
+            Log.w(TAG, "Not downloading GGUF: llama.cpp native inference is not bundled")
+            return@withContext false
+        }
         Log.i(TAG, "Downloading SmolLM2 GGUF from HuggingFace...")
         modelFile.parentFile?.mkdirs()
         return@withContext try {

@@ -22,6 +22,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -51,10 +52,12 @@ class KVIEInputMethodService : InputMethodService() {
     // ── State ──────────────────────────────────────────────────────────────────
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
+    private var isSensitiveInput = false
     private var isShifted = false
     private var currentMode = Mode.TEXT        // TEXT | EMOJI | HINDI | SNIPPETS
     private var currentLang: Locale = Locale.ENGLISH
     private var lastBuffer = StringBuilder()
+    private val MAX_BUFFER_LEN = 256
 
     private val scope = CoroutineScope(Dispatchers.Main)
 
@@ -182,15 +185,26 @@ class KVIEInputMethodService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         lastBuffer = StringBuilder()
-
-        val isPassword = (info?.inputType ?: 0).let {
-            (it and InputType.TYPE_TEXT_VARIATION_PASSWORD) != 0 ||
-            (it and InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD) != 0
-        }
+        isSensitiveInput = isSensitiveEditor(info)
+        if (isSensitiveInput) stopListening()
 
         if ((info?.inputType ?: 0) and InputType.TYPE_CLASS_NUMBER == InputType.TYPE_CLASS_NUMBER) {
             currentLang = Locale.ENGLISH
         }
+    }
+
+    private fun isSensitiveEditor(info: EditorInfo?): Boolean {
+        if (info == null) return false
+        val inputType = info.inputType
+        val inputClass = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+        val password = (inputClass == InputType.TYPE_CLASS_TEXT && variation in setOf(
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+        )) || (inputClass == InputType.TYPE_CLASS_NUMBER &&
+            variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+        return password || (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
     }
 
     override fun onDestroy() {
@@ -710,6 +724,9 @@ class KVIEInputMethodService : InputMethodService() {
             }
             else -> {
                 lastBuffer.append(key)
+                if (lastBuffer.length > MAX_BUFFER_LEN) {
+                    lastBuffer.delete(0, lastBuffer.length - MAX_BUFFER_LEN)
+                }
                 ic.commitText(key, 1)
             }
         }
@@ -777,6 +794,10 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun startListening() {
+        if (isSensitiveInput) {
+            Toast.makeText(this, "Voice input is disabled in sensitive fields", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Toast.makeText(this, "Speech recognition not available", Toast.LENGTH_SHORT).show()
             return
@@ -812,10 +833,9 @@ class KVIEInputMethodService : InputMethodService() {
             }
 
             override fun onPartialResults(partialResults: android.os.Bundle?) {
-                val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!partial.isNullOrEmpty() && partial[0].isNotBlank()) {
-                    Toast.makeText(this@KVIEInputMethodService, partial[0], Toast.LENGTH_SHORT).show()
-                }
+                // Do not display partial results in a Toast — avoids leaking
+                // transcribed content as a system-level overlay visible to
+                // other apps via accessibility / screen-capture.
             }
 
             override fun onBeginningOfSpeech() {}
@@ -838,6 +858,7 @@ class KVIEInputMethodService : InputMethodService() {
     // ══════════════════════════════════════════════════════════════════════════
 
     private fun handleFinalTranscript(rawTranscript: String) {
+        if (isSensitiveInput) return
         if (rawTranscript.isBlank()) {
             Toast.makeText(this, "Didn't catch that — try again", Toast.LENGTH_SHORT).show()
             return

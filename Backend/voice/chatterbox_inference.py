@@ -230,7 +230,25 @@ def _get_best_voice_prompt() -> str | None:
         for s, score in scored[:3]:
             print(f"  → {s.name}: {score:.2f}", flush=True)
 
-    return str(best[0])
+    return _validated_voice_prompt(best[0])
+
+
+def _validated_voice_prompt(path: str | Path | None) -> str | None:
+    """Only load regular audio files stored inside KVIE's voice-samples folder."""
+    if path is None:
+        return None
+    try:
+        sample_root = _VOICE_SAMPLES_DIR.resolve(strict=True)
+        candidate = Path(path).expanduser().resolve(strict=True)
+        if sample_root not in candidate.parents:
+            return None
+        if not candidate.is_file() or candidate.suffix.lower() not in {".wav", ".flac"}:
+            return None
+        if candidate.stat().st_size > 50 * 1024 * 1024:
+            return None
+        return str(candidate)
+    except (OSError, RuntimeError, ValueError):
+        return None
 
 
 class ChatterboxInference:
@@ -296,12 +314,18 @@ class ChatterboxInference:
     def _get_cached_embedding(self, prompt_path: str):
         """
         Cache speaker embeddings to avoid re-computing on every synthesis call.
-        Uses MD5 hash of the file as cache key.
+        Uses SHA-256 of the validated voice sample as the cache key.
         """
         try:
-            # Compute cache key from file content hash
-            with open(prompt_path, 'rb') as f:
-                file_hash = hashlib.md5(f.read(1024 * 64)).hexdigest()  # Hash first 64KB
+            safe_prompt_path = _validated_voice_prompt(prompt_path)
+            if safe_prompt_path is None:
+                return None
+
+            digest = hashlib.sha256()
+            with open(safe_prompt_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            file_hash = digest.hexdigest()
 
             # Check in-memory cache
             if file_hash in self._embedding_cache:
@@ -343,8 +367,15 @@ class ChatterboxInference:
         Returns:
             Absolute path to temporary generated WAV file, or None on failure.
         """
-        if not self.is_ready() or not text.strip():
+        if not isinstance(text, str) or not text.strip() or len(text) > 20_000:
             return None
+        if not self.is_ready():
+            return None
+
+        if language_id not in {"en", "hi"}:
+            language_id = "en"
+        if emotion not in CHATTERBOX_EMOTION_PARAMS:
+            emotion = "neutral"
 
         # Get emotion-based hyperparameters
         params = _get_emotion_params(emotion)
@@ -352,7 +383,7 @@ class ChatterboxInference:
               f"temp={params['temperature']:.2f}, cfg={params['cfg_weight']:.2f}", flush=True)
 
         # Determine prompt audio path (quality-weighted selection)
-        prompt_path = audio_prompt_path
+        prompt_path = _validated_voice_prompt(audio_prompt_path)
         if not prompt_path and use_user_voice:
             prompt_path = _get_best_voice_prompt()
 

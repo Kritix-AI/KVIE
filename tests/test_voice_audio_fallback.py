@@ -12,7 +12,7 @@ class AudioProcessingFallbackTests(unittest.TestCase):
         import struct
         import math
         samples = [int(32767 * math.sin(2 * math.pi * 440 * i / 44100))
-                   for i in range]
+                   for i in range(4410)]
         pcm = struct.pack('<' + 'h' * len(samples), *samples)
         result = pipeline.process(pcm)
         self.assertEqual(result.dtype.name, 'float32')

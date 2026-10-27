@@ -51,12 +51,9 @@ class KVIEAccessibilityService : AccessibilityService() {
      * Types text directly into the currently focused or editable field in any active app.
      */
     fun typeTextIntoFocusedField(newText: String): Boolean {
-        // Step 1: Copy newText to system clipboard
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val clip = ClipData.newPlainText("KVIE Voice", newText)
-        clipboard?.setPrimaryClip(clip)
+        if (KVIEInputMethodService.isCurrentInputSensitive()) return false
 
-        // Step 2: Check all interactive windows on screen
+        // Find a safe editable target before touching the clipboard or field.
         var targetNode: AccessibilityNodeInfo? = null
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -80,6 +77,20 @@ class KVIEAccessibilityService : AccessibilityService() {
         if (targetNode == null) {
             return false
         }
+        if (targetNode.isPassword) return false
+
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val previousClip = clipboard?.primaryClip
+        clipboard?.setPrimaryClip(ClipData.newPlainText("KVIE Voice", newText))
+
+        fun restoreClipboard() {
+            clipboard?.let { manager ->
+                if (manager.primaryClipDescription?.label?.toString() == "KVIE Voice") {
+                    if (previousClip != null) manager.setPrimaryClip(previousClip)
+                    else manager.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
+            }
+        }
 
         lastTargetPackage = targetNode.packageName?.toString()
 
@@ -87,6 +98,7 @@ class KVIEAccessibilityService : AccessibilityService() {
             // Step 3: Try ACTION_PASTE first (standard for all apps, preserving cursor position)
             val pasteSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
             if (pasteSuccess) {
+                restoreClipboard()
                 return true
             }
 
@@ -101,8 +113,11 @@ class KVIEAccessibilityService : AccessibilityService() {
             val arguments = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, textToSet)
             }
-            return targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            return targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments).also {
+                restoreClipboard()
+            }
         } catch (_: Exception) {
+            restoreClipboard()
             return false
         }
     }
@@ -121,7 +136,7 @@ class KVIEAccessibilityService : AccessibilityService() {
     }
 
     private fun searchNodeRecursively(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (node == null) return null
+        if (node == null || node.isPassword) return null
         if (node.isFocused && (node.isEditable || node.className?.contains("EditText", ignoreCase = true) == true)) {
             return node
         }

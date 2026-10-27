@@ -10,17 +10,27 @@ export interface VoiceSnippet {
 }
 
 export const DEFAULT_SNIPPETS: VoiceSnippet[] = [
-  { id: '1', triggerCue: 'my meeting link', expandedText: 'https://calendly.com/kritix/30min', enabled: true },
-  { id: '2', triggerCue: 'my email signature', expandedText: 'Best regards,\nKritix Voice Intelligence Engine Team', enabled: true },
-  { id: '3', triggerCue: 'my office address', expandedText: 'Kritix AI Labs, Cyber City, Suite 402, New Delhi, India', enabled: true },
-  { id: '4', triggerCue: 'my phone number', expandedText: '+91 98765 43210', enabled: true },
+  { id: '1', triggerCue: 'my meeting link', expandedText: 'https://calendly.com/your-username/30min', enabled: true },
+  { id: '2', triggerCue: 'my email signature', expandedText: 'Best regards,\nYour Name', enabled: true },
+  { id: '3', triggerCue: 'my office address', expandedText: 'Your Office Address', enabled: true },
+  { id: '4', triggerCue: 'my phone number', expandedText: '+XX XXXXX XXXXX', enabled: true },
 ]
+
+const MAX_SNIPPETS = 100
+const MAX_SNIPPET_TEXT_LEN = 2000
 
 export function getVoiceSnippets(): VoiceSnippet[] {
   const saved = localStorage.getItem('kvie_voice_snippets')
   if (saved) {
     try {
-      return JSON.parse(saved)
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed)) {
+        return parsed.slice(0, MAX_SNIPPETS).map(s => ({
+          ...s,
+          triggerCue: String(s.triggerCue ?? '').slice(0, 200),
+          expandedText: String(s.expandedText ?? '').slice(0, MAX_SNIPPET_TEXT_LEN),
+        }))
+      }
     } catch {
       // fallback
     }
@@ -48,10 +58,19 @@ export function expandVoiceSnippets(text: string): { expandedText: string; match
     const cue = snippet.triggerCue.trim().toLowerCase()
     if (!cue) continue
 
-    const regex = new RegExp(`\\b${escapeRegExp(cue)}\\b`, 'gi')
+    // Word-boundary via lookarounds: \b fails for cues starting/ending with
+    // punctuation ("...sig"), and a function replacement stops `$&`/`$1`
+    // sequences in user-defined expanded text being read as replacement
+    // patterns.
+    let regex: RegExp
+    try {
+      regex = new RegExp(`(?<![\\w'’])${escapeRegExp(cue)}(?![\\w'’])`, 'gi')
+    } catch {
+      regex = new RegExp(`\\b${escapeRegExp(cue)}\\b`, 'gi')
+    }
     if (regex.test(resultText)) {
       matched = snippet.triggerCue
-      resultText = resultText.replace(regex, snippet.expandedText)
+      resultText = resultText.replace(regex, () => snippet.expandedText)
     }
   }
 

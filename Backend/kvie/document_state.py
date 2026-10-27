@@ -90,11 +90,38 @@ class DocumentState:
         start, end = spans[index]
         return self.replace(start, end, replacement.strip(), metadata={**(metadata or {}), "sentence_index": index})
 
+    def clear(self, metadata: Optional[Dict[str, Any]] = None) -> DocumentSnapshot:
+        return self.replace(0, len(self._text), "", metadata={**(metadata or {}), "intent": "clear_all"})
+
+    def restore_version(self, version: int) -> None:
+        self._version = max(0, int(version))
+
+    # Periods that belong to abbreviations or initials are not sentence ends;
+    # splitting at them made replace/delete target the wrong sentence.
+    _ABBREVIATIONS = {
+        "e.g", "i.e", "etc", "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs",
+        "st", "no", "approx", "dept", "est", "inc", "ltd", "co", "fig", "min", "max",
+    }
+    _sentence_pattern = re.compile(r"\S.*?(?:[.!?]+(?=\s|$)|$)", re.DOTALL)
+
     def sentence_spans(self) -> List[Tuple[int, int]]:
-        matches = list(re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", self._text, re.DOTALL))
-        if not matches and self._text.strip():
+        spans: List[Tuple[int, int]] = []
+        pending_start: Optional[int] = None
+        for match in self._sentence_pattern.finditer(self._text):
+            start = pending_start if pending_start is not None else match.start()
+            end = match.end()
+            pending_start = None
+            tail = self._text[start:end].rstrip()
+            last_word = re.split(r"\s+", tail)[-1].lower().rstrip(".!?") if tail else ""
+            if last_word in self._ABBREVIATIONS or (len(last_word) == 1 and last_word.isalpha()):
+                pending_start = start
+                continue
+            spans.append((start, end))
+        if pending_start is not None:
+            spans.append((pending_start, len(self._text)))
+        if not spans and self._text.strip():
             return [(0, len(self._text))]
-        return [(match.start(), match.end()) for match in matches]
+        return spans
 
     def sentences(self) -> List[str]:
         return [self._text[start:end].strip() for start, end in self.sentence_spans()]

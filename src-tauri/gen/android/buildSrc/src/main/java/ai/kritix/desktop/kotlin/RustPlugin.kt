@@ -4,6 +4,7 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.get
+import org.gradle.api.GradleException
 
 const val TASK_GROUP = "rust"
 
@@ -24,6 +25,12 @@ open class RustPlugin : Plugin<Project> {
         val archList = (findProperty("archList") as? String)?.split(',') ?: defaultArchList
 
         val targetsList = (findProperty("targetList") as? String)?.split(',') ?: listOf("aarch64", "armv7", "i686", "x86_64")
+        val targetToArch = mapOf("aarch64" to "arm64", "armv7" to "arm", "i686" to "x86", "x86_64" to "x86_64")
+        if (abiList.any { it !in defaultAbiList } ||
+            targetsList.isEmpty() || targetsList.size != archList.size ||
+            targetsList.zip(archList).any { (target, arch) -> targetToArch[target] != arch }) {
+            throw GradleException("Invalid Rust Android ABI/target configuration")
+        }
 
         extensions.configure<ApplicationExtension> {
             @Suppress("UnstableApiUsage")
@@ -59,9 +66,7 @@ open class RustPlugin : Plugin<Project> {
 
                 tasks["mergeUniversal${profileCapitalized}JniLibFolders"].dependsOn(buildTask)
 
-                for (targetPair in targetsList.withIndex()) {
-                    val targetName = targetPair.value
-                    val targetArch = archList[targetPair.index]
+                for ((targetName, targetArch) in targetsList.zip(archList)) {
                     val targetArchCapitalized = targetArch.replaceFirstChar { it.uppercase() }
                     val targetBuildTask = project.tasks.maybeCreate(
                         "rustBuild$targetArchCapitalized$profileCapitalized",

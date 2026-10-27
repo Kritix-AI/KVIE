@@ -28,6 +28,17 @@ class KVIESession:
         loaded = store.load_document(document_id) if store else None
         self.document = loaded or DocumentState()
 
+    def clear_document(self) -> DocumentSnapshot:
+        """Wipe the active document (client clear-all) and persist the change."""
+        before = self.document.text
+        snapshot = self.document.clear()
+        if before != snapshot.text and self.store:
+            self.store.save_document(self.document_id, self.document)
+            history = self.document.history()
+            if history:
+                self.store.save_operation(self.document_id, history[-1])
+        return snapshot
+
     def process_transcript(self, text: str, metadata: Optional[dict] = None) -> SessionResult:
         decision = self.decisions.decide(text, self.document)
         before = self.document.text
@@ -35,5 +46,10 @@ class KVIESession:
         changed = before != snapshot.text
         if changed and self.store:
             self.store.save_document(self.document_id, self.document)
-            self.store.save_operation(self.document_id, self.document.history()[-1])
+            history = self.document.history()
+            if history:
+                # After an undo the top of the history is the *undone* operation,
+                # so guard against popping the only entry (IndexError) and never
+                # record a stale row.
+                self.store.save_operation(self.document_id, history[-1])
         return SessionResult(decision=decision, snapshot=snapshot, changed=changed)

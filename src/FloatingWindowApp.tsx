@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useLocalStreamingVoice } from './hooks/useLocalStreamingVoice'
@@ -7,10 +8,11 @@ import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
 import { runQwenAutoEdit } from './lib/autoEdit'
 import { isVoiceCommandIntent, executeVoiceCommand } from './lib/voiceCommandEngine'
-import { IncrementalTypingSession, processSpokenVoiceText } from './lib/incrementalTypingEngine'
+import { IncrementalTypingSession } from './lib/incrementalTypingEngine'
 import { applyCustomDictionary } from './lib/customDictionary'
 import { expandVoiceSnippets } from './lib/snippetsEngine'
 import { consensusTranscription } from './lib/consensusEngine'
+import { stripVerbalBacktracks } from './lib/backtrackStripper'
 import { SUPPORTED_LANGUAGES, getTranslationSettings, saveTranslationSettings } from './lib/translationEngine'
 import FloatingMicWidget from './components/FloatingMicWidget'
 
@@ -18,8 +20,12 @@ export const FloatingWindowApp: React.FC = () => {
   useAppTheme() // Binds --accent-color, --accent-glow, --accent-subtle dynamically
   const browserSpeech = useSpeechRecognition()
   const localVoice = useLocalStreamingVoice()
-  const speech = localVoice.isAvailable ? localVoice : browserSpeech
+  const speech = localVoice.isAvailable || isTauri() ? localVoice : browserSpeech
+
   const [injectionMessage, setInjectionMessage] = useState<string | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const [isUniversalMode, setIsUniversalMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('kvie_universal_mode')
@@ -45,8 +51,35 @@ export const FloatingWindowApp: React.FC = () => {
     saveTranslationSettings(next, targetLanguage)
   }
 
-  const typingSessionRef = useRef<IncrementalTypingSession>(new IncrementalTypingSession())
+  const typingSessionRef = useRef<IncrementalTypingSession | null>(null)
+  const getTypingSession = (): IncrementalTypingSession => {
+    if (!typingSessionRef.current) typingSessionRef.current = new IncrementalTypingSession()
+    return typingSessionRef.current
+  }
   const lastFinalTranscriptRef = useRef('')
+  const pushToTalkActiveRef = useRef(false)
+  const pushToTalkFinalizingRef = useRef(false)
+  const pushToTalkStartPromiseRef = useRef<Promise<boolean> | null>(null)
+  const pushToTalkReleasePendingRef = useRef(false)
+  const pushToTalkHandlersRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> }>({
+    start: async () => {},
+    stop: async () => {},
+  })
+  const toggleListeningRef = useRef<() => Promise<void>>(async () => {})
+  const injectQueueRef = useRef<Promise<void>>(Promise.resolve())
+
+  const enqueueRawInject = (eraseCount: number, text: string, verify = true): Promise<void> => {
+    const run = async () => {
+      const outcome = await tauriBridge.eraseAndInject(eraseCount, text, verify)
+      if (verify && outcome.verification === 'unverified') {
+        setInjectionMessage('Applied, but KVIE could not verify the paste — check the target app.')
+      }
+    }
+    const queued = injectQueueRef.current.then(run, run)
+    injectQueueRef.current = queued.catch(() => {})
+    return queued
+  }
+
   const [isConsensusMode, setIsConsensusMode] = useState(false)
   const [consensusDraft, setConsensusDraft] = useState<string | null>(null)
   const [consensusCount, setConsensusCount] = useState(0)
@@ -70,44 +103,12 @@ export const FloatingWindowApp: React.FC = () => {
   }, [isUniversalMode])
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined
-    void listen('toggle_mic_shortcut', () => {
-      const isEnabled = localStorage.getItem('kvie_global_hotkey_enabled') !== 'false'
-      if (!isEnabled) return
-
-      if (speech.isListening) {
-        const fullText = typingSessionRef.current.getFullText()
-        if (fullText) {
-          void saveVoiceSession(fullText)
-        }
-        browserSpeech.stopListening()
-        if (localVoice.isAvailable) localVoice.stopListening()
-        clearAll()
-      } else {
-        clearAll()
-        browserSpeech.startListening()
-        if (localVoice.isAvailable) {
-          void localVoice.startListening()
-        }
-      }
-    }).then(fn => { unlisten = fn })
-
-    return () => {
-      if (unlisten) unlisten()
-    }
-  }, [speech.isListening, browserSpeech, localVoice])
-
-  const clearAll = () => {
-    const fullText = typingSessionRef.current.getFullText()
-    if (fullText) {
-      void saveVoiceSession(fullText)
-    }
-    speech.clearTranscript()
-    localVoice.clearTranscript()
-    browserSpeech.clearTranscript()
-    typingSessionRef.current.reset()
-    lastFinalTranscriptRef.current = ''
-  }
+    void tauriBridge.centerTopNotch().catch(() => {})
+    const timer = setTimeout(() => {
+      void tauriBridge.centerTopNotch().catch(() => {})
+    }, 60)
+    return () => clearTimeout(timer)
+  }, [])
 
   const [isCommandMode, setIsCommandMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('kvie_command_mode')
@@ -118,128 +119,287 @@ export const FloatingWindowApp: React.FC = () => {
     localStorage.setItem('kvie_command_mode', String(isCommandMode))
   }, [isCommandMode])
 
-  // Auto-save voice session, execute commands, or finalize buffer whenever recording stops
-  useEffect(() => {
-    if (!speech.isListening) {
-      const fullText = typingSessionRef.current.getFullText()
-      if (fullText) {
-        typingSessionRef.current.commitCurrent()
-        const raw = fullText
-        void tauriBridge.getActiveAppContext().then(async ctx => {
-          if (isCommandMode || isVoiceCommandIntent(raw)) {
-            setInjectionMessage('Executing Voice Command (Qwen2.5)...')
-            const cmdResult = await executeVoiceCommand(raw, ctx.surrounding_text, ctx.app_name)
-            if (cmdResult.isSuccess) {
-              const eraseCount = ctx.surrounding_text.length > 0 ? ctx.surrounding_text.length : raw.length
-              await tauriBridge.eraseAndInject(eraseCount, cmdResult.transformedText)
-              void saveVoiceSession(`[Command: ${raw}] -> ${cmdResult.transformedText}`, ctx.app_name)
-              setInjectionMessage('Voice Command Applied!')
-              return
-            }
+  const clearAll = (skipSave = false) => {
+    const fullText = getTypingSession().getFullText()
+    if (fullText && !skipSave) {
+      void saveVoiceSession(fullText)
+    }
+    speech.clearTranscript()
+    localVoice.clearTranscript()
+    browserSpeech.clearTranscript()
+    getTypingSession().reset()
+    lastFinalTranscriptRef.current = ''
+  }
+
+  /**
+   * Wispr Flow-style Unified Pipeline:
+   * 1. Query active target app context without stealing focus
+   * 2. Execute voice commands (Qwen2.5) if active or intent detected
+   * 3. Natural language polish: strip verbal backtracks, expand snippets, apply custom dictionary & Qwen auto-edit
+   * 4. Single atomic injection into target app
+   * 5. Record session history and show quick success feedback
+   */
+  const processAndInjectFinal = async (rawInput: string, appSource = 'Floating Mic') => {
+    const raw = rawInput.trim()
+    if (!raw) {
+      setInjectionMessage(localVoice.getLastError() || 'No speech detected. Speak clearly into the microphone.')
+      return
+    }
+
+    setIsProcessing(true)
+    setInjectionMessage('Polishing…')
+
+    try {
+      const ctx = await tauriBridge.getActiveAppContext().catch(() => null)
+      const appName = ctx?.app_name || appSource
+
+      // ── Step 1: Voice Command Mode / Intent ────────────────────────────────
+      if (isCommandMode || isVoiceCommandIntent(raw)) {
+        setInjectionMessage('Executing Voice Command…')
+        const cmdResult = await executeVoiceCommand(raw, ctx?.surrounding_text || '', ctx?.app_name)
+        if (cmdResult.isSuccess) {
+          if (isUniversalMode) {
+            await enqueueRawInject(0, cmdResult.transformedText, true)
+          } else {
+            await navigator.clipboard.writeText(cmdResult.transformedText).catch(() => {})
           }
-
-          const cleaned = await runQwenAutoEdit(raw, {
-            surroundingText: ctx.surrounding_text,
-            targetApp: ctx.app_name,
-          })
-          void saveVoiceSession(cleaned || raw, ctx.app_name)
-        }).catch(() => {
-          void saveVoiceSession(raw)
-        })
-      }
-      clearAll()
-    }
-  }, [speech.isListening, isCommandMode])
-
-  // Smart Incremental Real-time live streaming typing + Custom Dictionary + Snippets + Live Translation
-  useEffect(() => {
-    if (!isUniversalMode || !speech.isListening) return
-
-    const session = typingSessionRef.current
-    const currentFinal = speech.transcript || ''
-    const currentInterim = speech.interimTranscript || ''
-    const latestSeg = localVoice.latestSegment || ''
-
-    let isCancelled = false
-
-    // ── CONSENSUS MODE: collect segments instead of typing ──
-    if (isConsensusMode && currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
-      lastFinalTranscriptRef.current = currentFinal
-      const next = [...consensusRef.current, currentFinal]
-      consensusRef.current = next
-      setConsensusCount(next.length)
-      setInjectionMessage(`Recording #${next.length} — speak again (2-3x)`)
-      return () => { isCancelled = true }
-    }
-
-    // Case 1: Final segment arrived (e.g. after a pause)
-    if (currentFinal && currentFinal !== lastFinalTranscriptRef.current) {
-      let newFinalPortion = currentFinal
-      if (currentFinal.startsWith(lastFinalTranscriptRef.current)) {
-        newFinalPortion = currentFinal.slice(lastFinalTranscriptRef.current.length).trim()
-      } else if (latestSeg) {
-        newFinalPortion = latestSeg
+          void saveVoiceSession(`[Command: ${raw}] -> ${cmdResult.transformedText}`, appName)
+          setIsProcessing(false)
+          setIsSuccess(true)
+          setSuccessMessage('Voice Command Applied!')
+          setTimeout(() => {
+            setIsSuccess(false)
+            setSuccessMessage(null)
+            setInjectionMessage(null)
+          }, 1400)
+          return
+        }
       }
 
-      lastFinalTranscriptRef.current = currentFinal
+      // ── Step 2: Natural Language Polish & Translation ────────────────────
+      const stripped = stripVerbalBacktracks(raw)
+      let cleaned = await runQwenAutoEdit(stripped, {
+        surroundingText: ctx?.surrounding_text,
+        targetApp: ctx?.app_name,
+      })
 
-      if (newFinalPortion) {
-        void (async () => {
-          // ── CRITICAL: Use the SAME processing pipeline as interim (line 191)
-          // for delta consistency. processSpokenVoiceText includes translation
-          // which changes words and breaks the delta calculation.
-          const processedFinal = applyCustomDictionary(
-            expandVoiceSnippets(newFinalPortion).expandedText
-          )
-          if (isCancelled) return
+      if (!cleaned || !cleaned.trim()) {
+        cleaned = applyCustomDictionary(expandVoiceSnippets(stripped).expandedText)
+      }
 
-          const delta = session.processSegment(processedFinal, true)
-          if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-            await tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText)
-            setInjectionMessage(isTranslationEnabled ? 'Typed & saved' : 'Typed & saved')
+      if (!cleaned.trim()) {
+        setIsProcessing(false)
+        return
+      }
+
+      // ── Step 3: Single Atomic Injection ───────────────────────────────────
+      let pasteSuccess = true
+      if (isUniversalMode) {
+        try {
+          await enqueueRawInject(0, cleaned, true)
+        } catch (pasteErr) {
+          pasteSuccess = false
+          const reason = pasteErr instanceof Error ? pasteErr.message : String(pasteErr)
+          try {
+            await navigator.clipboard.writeText(cleaned)
+            setInjectionMessage(`Could not paste into ${appName} (${reason}). Copied to clipboard!`)
+          } catch {
+            setInjectionMessage(`Could not paste into ${appName}: ${reason}`)
           }
-        })().catch(err => {
-          setInjectionMessage(err instanceof Error ? err.message : String(err))
-        })
+        }
+      } else {
+        await navigator.clipboard.writeText(cleaned).catch(() => {})
       }
-      return () => { isCancelled = true }
-    }
 
-    // Case 2: Active Interim speech clause while speaking
-    if (currentInterim) {
-      // Instant synchronous dictionary correction & snippet expansion on interim preview
-      const quickInterim = applyCustomDictionary(expandVoiceSnippets(currentInterim).expandedText)
-      const delta = session.processSegment(quickInterim, false)
-      if (delta.eraseCount > 0 || delta.appendText.length > 0) {
-        void tauriBridge.eraseAndInject(delta.eraseCount, delta.appendText).then(() => {
-          setInjectionMessage('Typing...')
-        }).catch(err => {
-          setInjectionMessage(err instanceof Error ? err.message : String(err))
-        })
+      // ── Step 4: Save to Voice Session History ─────────────────────────────
+      void saveVoiceSession(cleaned, appName)
+
+      // ── Step 5: Visual Feedback ───────────────────────────────────────────
+      setIsProcessing(false)
+      if (pasteSuccess) {
+        setIsSuccess(true)
+        const label = isUniversalMode ? `Pasted into ${appName}` : 'Copied to clipboard'
+        setSuccessMessage(label)
+        setInjectionMessage(label)
+        setTimeout(() => {
+          setIsSuccess(false)
+          setSuccessMessage(null)
+          setInjectionMessage(null)
+        }, 1400)
       }
-    }
-
-    return () => { isCancelled = true }
-  }, [speech.interimTranscript, speech.transcript, speech.isListening, localVoice.latestSegment, isUniversalMode, isTranslationEnabled, targetLanguage, isConsensusMode])
-
-
-  const handleToggleListening = () => {
-    if (speech.isListening) {
-      const fullText = typingSessionRef.current.getFullText()
-      if (fullText) {
-        void saveVoiceSession(fullText)
-      }
-      speech.stopListening()
-      clearAll()
-    } else {
-      clearAll()
-      void speech.startListening()
+    } catch (error) {
+      setIsProcessing(false)
+      setInjectionMessage(error instanceof Error ? error.message : String(error))
     }
   }
 
+  const [isContinuousMode, setIsContinuousMode] = useState(false)
+
+  const handleCancelListening = async () => {
+    if (speech.isListening) {
+      try {
+        await speech.stopListening()
+      } catch {}
+    }
+    pushToTalkActiveRef.current = false
+    setIsContinuousMode(false)
+    clearAll(true)
+    setInjectionMessage(null)
+    setIsProcessing(false)
+    void tauriBridge.resetHotkeyState().catch(() => {})
+  }
+
+  const startPushToTalk = async () => {
+    if (pushToTalkActiveRef.current || localStorage.getItem('kvie_global_hotkey_enabled') === 'false') return
+    if (!localVoice.isAvailable) {
+      setInjectionMessage('Voice input unavailable. Check the STT service and selected model.')
+      return
+    }
+    if (localVoice.isListening) {
+      setInjectionMessage('Stop the current recording before using push-to-talk.')
+      return
+    }
+
+    clearAll(true)
+    pushToTalkActiveRef.current = true
+    pushToTalkFinalizingRef.current = false
+    pushToTalkReleasePendingRef.current = false
+    setIsContinuousMode(false)
+    setInjectionMessage('Push to talk')
+    const startPromise = localVoice.startListening()
+    pushToTalkStartPromiseRef.current = startPromise
+    const started = await startPromise
+    pushToTalkStartPromiseRef.current = null
+    if (!started) {
+      pushToTalkActiveRef.current = false
+      setInjectionMessage('Microphone did not start. Check microphone permission and the STT service.')
+      return
+    }
+    if (pushToTalkReleasePendingRef.current) {
+      pushToTalkReleasePendingRef.current = false
+      void pushToTalkHandlersRef.current.stop()
+    }
+  }
+
+  const stopPushToTalk = async () => {
+    if (!pushToTalkActiveRef.current) return
+    if (pushToTalkStartPromiseRef.current) {
+      pushToTalkReleasePendingRef.current = true
+      await pushToTalkStartPromiseRef.current
+      if (pushToTalkFinalizingRef.current || !pushToTalkActiveRef.current) return
+    }
+    if (pushToTalkFinalizingRef.current) return
+    pushToTalkFinalizingRef.current = true
+    try {
+      const raw = await localVoice.stopListening()
+      pushToTalkActiveRef.current = false
+      await processAndInjectFinal(raw, 'Push to Talk')
+    } catch (error) {
+      setInjectionMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      pushToTalkActiveRef.current = false
+      setIsContinuousMode(false)
+      clearAll(true)
+      pushToTalkFinalizingRef.current = false
+    }
+  }
+
+  const handleToggleListening = async () => {
+    if (speech.isListening) {
+      if (pushToTalkFinalizingRef.current) return
+      pushToTalkFinalizingRef.current = true
+      try {
+        const result = await speech.stopListening()
+        const raw = (typeof result === 'string' && result.trim())
+          ? result
+          : (speech.transcript || speech.interimTranscript || '')
+        await processAndInjectFinal(raw, 'Floating Mic')
+      } catch (error) {
+        setInjectionMessage(error instanceof Error ? error.message : String(error))
+      } finally {
+        setIsContinuousMode(false)
+        clearAll(true)
+        pushToTalkFinalizingRef.current = false
+      }
+    } else {
+      clearAll(true)
+      setIsContinuousMode(true)
+      setInjectionMessage('Continuous listening')
+      const started = await speech.startListening()
+      if (started === false) {
+        setIsContinuousMode(false)
+        setInjectionMessage(localVoice.getLastError() || 'Microphone could not start. Check its permission and the STT service.')
+      }
+    }
+  }
+
+  pushToTalkHandlersRef.current = { start: startPushToTalk, stop: stopPushToTalk }
+  toggleListeningRef.current = handleToggleListening
+
+  // ── Global Hotkey Listeners ────────────────────────────────────────────────
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    void listen('toggle_mic_shortcut', () => {
+      const isEnabled = localStorage.getItem('kvie_global_hotkey_enabled') !== 'false'
+      if (!isEnabled) return
+      void toggleListeningRef.current()
+    }).then(fn => { unlisten = fn })
+
+    return () => {
+      if (unlisten) unlisten()
+    }
+  }, [])
+
+  useEffect(() => {
+    let unlistenStart: (() => void) | undefined
+    let unlistenStop: (() => void) | undefined
+    let unlistenMode: (() => void) | undefined
+    void listen('push_to_talk_start', () => {
+      setIsContinuousMode(false)
+      void pushToTalkHandlersRef.current.start()
+    }).then(unlisten => { unlistenStart = unlisten })
+    void listen('push_to_talk_stop', () => {
+      setIsContinuousMode(false)
+      void pushToTalkHandlersRef.current.stop()
+    }).then(unlisten => { unlistenStop = unlisten })
+    void listen<string>('push_to_talk_mode', (event) => {
+      // Double-tap ` switches the running session to continuous listening —
+      // the microphone stays on hands-free.
+      if (event.payload === 'continuous') {
+        setIsContinuousMode(true)
+        setInjectionMessage('Continuous listening')
+      }
+    }).then(unlisten => { unlistenMode = unlisten })
+    return () => {
+      unlistenStart?.()
+      unlistenStop?.()
+      unlistenMode?.()
+    }
+  }, [])
+
+  // ── Consensus Mode Multi-Take Collection ───────────────────────────────────
+  useEffect(() => {
+    if (!speech.isListening || !isConsensusMode) return
+    const currentFinal = speech.transcript || ''
+    const latestSeg = localVoice.latestSegment || ''
+    const base = lastFinalTranscriptRef.current
+
+    if (currentFinal && currentFinal !== base) {
+      const portion = currentFinal.startsWith(base) && base
+        ? currentFinal.slice(base.length).trim()
+        : (latestSeg || currentFinal)
+      lastFinalTranscriptRef.current = currentFinal
+      if (portion) {
+        const next = [...consensusRef.current, portion]
+        consensusRef.current = next
+        setConsensusCount(next.length)
+        setInjectionMessage(`Recording #${next.length} — speak again (2-3x)`)
+      }
+    }
+  }, [speech.transcript, speech.isListening, localVoice.latestSegment, isConsensusMode])
+
   const handleConsensusToggle = () => {
     if (!isConsensusMode) {
-      // Start consensus mode
       consensusRef.current = []
       setConsensusCount(0)
       setConsensusDraft(null)
@@ -253,52 +413,42 @@ export const FloatingWindowApp: React.FC = () => {
       setTimeout(() => setInjectionMessage(null), 3000)
       return
     }
-    // Stop listening before computing
     if (speech.isListening) {
-      speech.stopListening()
+      void speech.stopListening()
     }
     const result = consensusTranscription(consensusRef.current)
     setConsensusDraft(result)
     setConsensusCount(0)
     consensusRef.current = []
     setIsConsensusMode(false)
-    // Type the consensus text directly (skip incremental engine)
-    void tauriBridge.eraseAndInject(0, result)
+    void enqueueRawInject(0, result)
       .then(() => {
-        setInjectionMessage('Consensus typed!')
-        setTimeout(() => setInjectionMessage(null), 2000)
+        setIsSuccess(true)
+        setSuccessMessage('Consensus typed!')
+        setTimeout(() => {
+          setIsSuccess(false)
+          setSuccessMessage(null)
+        }, 1400)
       })
-      .catch(err => {
+      .catch(() => {
         setInjectionMessage('Consensus ready — copied to clipboard')
         navigator.clipboard.writeText(result).catch(() => {})
         setTimeout(() => setInjectionMessage(null), 3000)
       })
   }
 
-  const injectDraft = async () => {
-    const textToInject = speech.interimTranscript || speech.transcript || localVoice.latestSegment
-    if (!textToInject.trim()) return
-    const processed = await processSpokenVoiceText(textToInject, {
-      applyTranslation: isTranslationEnabled,
-      targetLanguage,
-    })
-    await saveVoiceSession(processed)
-    await tauriBridge.eraseAndInject(0, processed)
-  }
-
   return (
     <div
-      data-tauri-drag-region
       style={{
-        width: 'max-content',
-        height: 'max-content',
-        display: 'inline-flex',
-        alignItems: 'center',
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'flex-start',
         justifyContent: 'center',
         background: 'transparent',
         overflow: 'visible',
-        padding: '4px',
-        margin: 'auto',
+        padding: 0,
+        margin: 0,
       }}
     >
       <FloatingMicWidget
@@ -310,6 +460,10 @@ export const FloatingWindowApp: React.FC = () => {
         isConsensusMode={isConsensusMode}
         consensusCount={consensusCount}
         targetLanguageName={SUPPORTED_LANGUAGES.find(l => l.code === targetLanguage)?.name || targetLanguage}
+        audioLevel={localVoice.audioLevel || 0}
+        isProcessing={isProcessing}
+        isSuccess={isSuccess}
+        successMessage={successMessage}
         onToggleListening={handleToggleListening}
         onToggleUniversalMode={() => setIsUniversalMode(prev => !prev)}
         onToggleCommandMode={() => setIsCommandMode(prev => !prev)}
@@ -317,7 +471,8 @@ export const FloatingWindowApp: React.FC = () => {
         onToggleConsensus={handleConsensusToggle}
         onConsensusComplete={handleConsensusComplete}
         onClearText={clearAll}
-        onClose={() => tauriBridge.closeFloatingMic()}
+        onCancelListening={handleCancelListening}
+        isContinuousListening={isContinuousMode}
         interimTranscript={speech.interimTranscript}
         recentTranscript={speech.transcript || localVoice.latestSegment}
         statusMessage={injectionMessage}

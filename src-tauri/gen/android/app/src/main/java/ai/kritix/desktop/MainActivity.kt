@@ -4,6 +4,7 @@ import ai.kritix.kviekeyboard.SetupActivity
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,15 +14,20 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import java.util.WeakHashMap
 
 class MainActivity : TauriActivity() {
 
   companion object {
     @JvmStatic
     var instance: MainActivity? = null
+    private val bridgedWebViews = WeakHashMap<WebView, Boolean>()
   }
 
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -77,18 +83,83 @@ class MainActivity : TauriActivity() {
 
   private fun attachBridgeToWebView(root: View): Boolean {
     if (root is WebView) {
+      if (bridgedWebViews.containsKey(root)) return true
       try {
         root.settings.javaScriptEnabled = true
         root.settings.domStorageEnabled = true
         root.settings.mediaPlaybackRequiresUserGesture = false
+        root.settings.allowFileAccess = false
+        root.settings.allowContentAccess = false
+        root.settings.allowFileAccessFromFileURLs = false
+        root.settings.allowUniversalAccessFromFileURLs = false
+        root.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        root.settings.javaScriptCanOpenWindowsAutomatically = false
+        root.settings.setSupportMultipleWindows(false)
+        root.settings.databaseEnabled = false
+        val originalClient = if (WebViewFeature.isFeatureSupported(WebViewFeature.GET_WEB_VIEW_CLIENT)) {
+          WebViewCompat.getWebViewClient(root)
+        } else null
+        root.webViewClient = object : WebViewClient() {
+          override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean {
+            if (!isTrustedAppUri(request.url)) {
+              view.removeJavascriptInterface("AndroidKeyboardBridge")
+              return true
+            }
+            return originalClient?.shouldOverrideUrlLoading(view, request) ?: false
+          }
+
+          override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+            if (!isTrustedAppUri(Uri.parse(url))) {
+              view.removeJavascriptInterface("AndroidKeyboardBridge")
+              return true
+            }
+            return originalClient?.shouldOverrideUrlLoading(view, url) ?: false
+          }
+
+          override fun shouldInterceptRequest(view: WebView, request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? =
+            originalClient?.shouldInterceptRequest(view, request) ?: super.shouldInterceptRequest(view, request)
+
+          override fun shouldInterceptRequest(view: WebView, url: String): android.webkit.WebResourceResponse? =
+            originalClient?.shouldInterceptRequest(view, url) ?: super.shouldInterceptRequest(view, url)
+
+          override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+            if (!isTrustedAppUri(Uri.parse(url))) {
+              view.removeJavascriptInterface("AndroidKeyboardBridge")
+              view.stopLoading()
+              return
+            }
+            originalClient?.onPageStarted(view, url, favicon)
+          }
+
+          override fun onPageFinished(view: WebView, url: String) {
+            originalClient?.onPageFinished(view, url)
+          }
+        }
         root.webChromeClient = object : android.webkit.WebChromeClient() {
           override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+            val permissionRequest = request ?: return
+            val origin = permissionRequest.origin
+            val trustedLocalOrigin = when (origin.scheme) {
+              "http" -> (origin.host == "tauri.localhost" && origin.port in setOf(-1, 80)) ||
+                (origin.host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") && origin.port == 5173)
+              "https" -> origin.host in setOf("tauri.localhost", "localhost") && origin.port in setOf(-1, 443)
+              else -> false
+            }
+            val requestedResources = permissionRequest.resources
+            val audioOnly = requestedResources.isNotEmpty() && requestedResources.all {
+              it == android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE
+            }
+            if (!trustedLocalOrigin || !audioOnly) {
+              permissionRequest.deny()
+              return
+            }
             runOnUiThread {
-              request?.grant(request.resources)
+              permissionRequest.grant(requestedResources)
             }
           }
         }
         root.addJavascriptInterface(AndroidBridge(this), "AndroidKeyboardBridge")
+        bridgedWebViews[root] = true
         return true
       } catch (_: Exception) {
         return false
@@ -102,6 +173,14 @@ class MainActivity : TauriActivity() {
       }
     }
     return false
+  }
+
+  private fun isTrustedAppUri(uri: Uri): Boolean = when (uri.scheme) {
+    "http" -> (uri.host == "tauri.localhost" && uri.port in setOf(-1, 80)) ||
+      (uri.host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") && uri.port == 5173)
+    "https" -> uri.host in setOf("tauri.localhost", "localhost") && uri.port in setOf(-1, 443)
+    "tauri" -> uri.host == "localhost"
+    else -> false
   }
 
   fun openKeyboardSettingsInternal() {
@@ -152,6 +231,27 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  fun startFloatingMicInternal(): Boolean {
+    if (!android.provider.Settings.canDrawOverlays(this)) {
+      runOnUiThread {
+        try {
+          val intent = Intent(
+            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+          ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+          startActivity(intent)
+        } catch (_: Exception) {}
+      }
+      return false
+    }
+
+    return try {
+      startService(Intent(this, ai.kritix.kviekeyboard.FloatingMicService::class.java)) != null
+    } catch (_: Exception) {
+      false
+    }
+  }
+
   class AndroidBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun isAndroid(): Boolean = true
@@ -169,6 +269,11 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun isAccessibilityEnabled(): Boolean {
       return ai.kritix.kviekeyboard.KVIEAccessibilityService.isAvailable
+    }
+
+    @JavascriptInterface
+    fun startFloatingMic(): Boolean {
+      return activity.startFloatingMicInternal()
     }
 
     @JavascriptInterface

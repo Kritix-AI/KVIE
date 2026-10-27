@@ -1,4 +1,5 @@
 import { tauriBridge } from './tauriBridge'
+import { getServiceBaseUrl } from './modelsApi'
 
 export interface VoiceSession {
   id: string
@@ -8,14 +9,17 @@ export interface VoiceSession {
   wordCount: number
 }
 
+const MAX_SESSIONS = 200
+const MAX_SESSION_TEXT_LEN = 10000
+
 export const saveVoiceSession = async (sessionOrText: string | VoiceSession, overrideApp?: string) => {
   let cleanText = ''
   let targetApp = overrideApp || 'Kritix Workspace'
 
   if (typeof sessionOrText === 'string') {
-    cleanText = sessionOrText.trim()
+    cleanText = sessionOrText.trim().slice(0, MAX_SESSION_TEXT_LEN)
   } else if (sessionOrText && typeof sessionOrText === 'object') {
-    cleanText = (sessionOrText.text || '').trim()
+    cleanText = (sessionOrText.text || '').trim().slice(0, MAX_SESSION_TEXT_LEN)
     if (sessionOrText.targetApp) {
       targetApp = sessionOrText.targetApp
     }
@@ -57,12 +61,25 @@ export const saveVoiceSession = async (sessionOrText: string | VoiceSession, ove
     wordCount: cleanText.split(/\s+/).length,
   }
 
-  const updatedSessions = [newSession, ...currentSessions]
-  localStorage.setItem('kvie_voice_sessions', JSON.stringify(updatedSessions))
+  const updatedSessions = [newSession, ...currentSessions].slice(0, MAX_SESSIONS)
+  try {
+    localStorage.setItem('kvie_voice_sessions', JSON.stringify(updatedSessions))
+  } catch {
+    // Quota exceeded — drop the session rather than crash an unawaited save.
+    return
+  }
 
   try {
     window.AndroidKeyboardBridge?.recordSession?.(cleanText, targetApp)
   } catch {}
+
+  // Mirror into the backend's dictation-history DB (Wispr-style History table).
+  // Fire-and-forget: the local service may be offline, localStorage is primary.
+  void fetch(`${getServiceBaseUrl()}/api/history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_text: cleanText, final_text: cleanText, app_name: targetApp }),
+  }).catch(() => {})
 
   window.dispatchEvent(new Event('storage'))
 }

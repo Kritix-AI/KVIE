@@ -13,6 +13,8 @@ import { expandVoiceSnippets } from './snippetsEngine'
 import { applyCustomDictionary, getCustomVocabularyPrompt } from './customDictionary'
 import { getTranslationSettings, translateText } from './translationEngine'
 import { TokenEngine, SentenceEngine, ParagraphEngine, FinalEditor, runGrammarRouter } from './grammarRouter'
+import { isAndroid } from './androidKeyboard'
+import { getServiceBaseUrl } from './modelsApi'
 
 // Stage 1: Ultra-Fast Regex Hesitation & Filler Word Sanitizer + Token Engine (0ms Latency)
 export function sanitizeRawTranscript(text: string): string {
@@ -79,22 +81,19 @@ Surrounding Text Context: ${surroundingContext.slice(0, 300)}`
   const userPrompt = `Clean up this voice transcript:\n"${candidateText}"`
 
   try {
+    if (isAndroid()) throw new Error('Android uses its local keyboard engine')
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 1200) // 1.2s timeout fallback
 
-    const response = await fetch('http://localhost:11434/api/generate', {
+    const response = await fetch(`${getServiceBaseUrl()}/api/ollama/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
         model: options.modelId || 'qwen2.5:1.5b',
         prompt: `${systemPrompt}\n\n${userPrompt}`,
-        stream: false,
-        options: {
-          temperature: 0.1,
-          top_p: 0.9,
-          num_predict: 120,
-        },
+        temperature: 0.1,
+        max_tokens: 120,
       }),
     })
 

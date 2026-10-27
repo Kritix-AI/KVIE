@@ -7,6 +7,7 @@ the same engine can be driven by PyAudio, Tauri, or deterministic tests.
 
 from __future__ import annotations
 
+import collections
 import queue
 import re
 import threading
@@ -40,6 +41,7 @@ class StreamingSTTConfig:
     window_ms: int = 2500       # Whisper needs 2-3s minimum for accurate transcription
     overlap_ms: int = 800       # Large overlap for continuity between windows
     min_chunk_ms: int = 1500    # First partial after 1.5 seconds of speech
+    draft_interval_ms: int = 1000  # Avoid re-running Whisper for every 32 ms frame
     language: str = "auto"
 
     @property
@@ -89,48 +91,35 @@ class StreamingSTT:
         self._transcriber = transcriber or self._default_transcriber
         self._on_event = on_event
         self._queue: queue.Queue[Union[bytes, _FlushRequest, _StopRequest]] = queue.Queue()
-        self._events: queue.Queue[TranscriptEvent] = queue.Queue()
+        # Bounded event log: the service drains nothing from events(), so an
+        # unbounded queue would leak memory for every session.
+        self._events: "collections.deque[TranscriptEvent]" = collections.deque(maxlen=256)
         self._buffer = bytearray()
+        self._audio_bytes_processed = 0
+        self._last_draft_processed_bytes = 0
         self._buffer_start_ms = 0
         self._sequence = 0
         self._rolling_text = ""
         self._rolling_confidence = 0.0
         self._rolling_language = ""
         self._silence_count = 0
-        self._buffer = bytearray()
-        self._buffer_start_ms = 0
-        self._callback = None
-        self._audio_start_ms = None
-        self._last_emit_ms = None
-        self._consecutive_empty = 0
         self._worker: Optional[threading.Thread] = None
         self._running = False
-        self._lock = threading.Lock()
         self._state_lock = threading.Lock()
 
     @staticmethod
     def _default_transcriber(audio: bytes, duration: float, language: str):
         from Backend.voice.STT import transcribe_with_confidence
+        from Backend.voice import STT
 
-        return transcribe_with_confidence(audio, duration, language)
-
-    @staticmethod
-    def _transcribe_fast_with_beam(audio: bytes, duration: float, language: str, min_confidence: float = 0.5):
-        """Two-pass transcriber: fast single-beam first, wide-beam retry only on low confidence."""
-        from Backend.voice.STT import _transcribe_faster_whisper, transcribe_with_confidence
-
-        text, confidence = transcribe_with_confidence(audio, duration, language)
-        if confidence >= min_confidence:
-            return text, confidence
-        # Low confidence → retry with wider beam (5 beams) using the same audio
-        try:
-            arr = StreamingSTT._bytes_to_numpy(audio)
-            text2, _, conf2 = _transcribe_faster_whisper(StreamingSTT._model_ref, arr, language, beam_size=5)
-            if conf2 > confidence:
-                return text2, conf2
-        except Exception:
-            pass
-        return text, confidence
+        # retry=False: the streaming worker must never block on the expensive
+        # beam-5 retry, or flushes time out and the session's final text dies.
+        result = transcribe_with_confidence(audio, duration, language, retry=False)
+        if duration >= 0.3 and not STT.is_loaded():
+            raise RuntimeError(
+                "The selected speech model could not be loaded. Check the Models page and select an installed STT model."
+            )
+        return result
 
     @property
     def is_running(self) -> bool:
@@ -157,7 +146,6 @@ class StreamingSTT:
             worker.join(timeout=timeout)
         with self._state_lock:
             self._running = False
-        self._lock = threading.Lock()
         self._emit("stopped")
 
     def push_pcm(self, pcm: bytes) -> None:
@@ -178,8 +166,8 @@ class StreamingSTT:
 
         while True:
             try:
-                yield self._events.get_nowait()
-            except queue.Empty:
+                yield self._events.popleft()
+            except IndexError:
                 return
 
     def _run(self) -> None:
@@ -188,6 +176,7 @@ class StreamingSTT:
             try:
                 if isinstance(item, bytes):
                     self._buffer.extend(item)
+                    self._audio_bytes_processed += len(item)
                     self._drain_windows(final=False)
                 elif isinstance(item, _FlushRequest):
                     self._drain_windows(final=True)
@@ -206,22 +195,45 @@ class StreamingSTT:
 
         # Phase 2: early draft — enough audio accumulated but not a full window yet.
         # Fire a partial so the client can show the user what we have so far.
-        if not final and len(self._buffer) >= self.config.min_chunk_bytes:
+        draft_interval_bytes = int(
+            self.config.bytes_per_second * self.config.draft_interval_ms / 1000
+        )
+        if (
+            not final
+            and len(self._buffer) >= self.config.min_chunk_bytes
+            and self._audio_bytes_processed - self._last_draft_processed_bytes >= draft_interval_bytes
+        ):
             window = bytes(self._buffer)
-            duration_ms = int(len(window) / self.config.bytes_per_second * 1000)
             self._transcribe(window, self._buffer_start_ms, final=False, is_draft=True)
+            self._last_draft_processed_bytes = self._audio_bytes_processed
 
         # Phase 3: flush remaining
-        if final and self._buffer:
-            window = bytes(self._buffer)
-            duration_ms = int(len(window) / self.config.bytes_per_second * 1000)
-            if duration_ms >= 200:
-                self._transcribe(window, self._buffer_start_ms, final=True)
-            self._buffer.clear()
-            self._buffer_start_ms = 0
-            self._rolling_text = ""
-            self._rolling_confidence = 0.0
+        if final:
+            if self._buffer:
+                window = bytes(self._buffer)
+                duration_ms = int(len(window) / self.config.bytes_per_second * 1000)
+                if duration_ms >= 200:
+                    self._transcribe(window, self._buffer_start_ms, final=True)
+                self._buffer.clear()
+                self._buffer_start_ms = 0
+            # If the trailing window was silence (or too short to transcribe),
+            # any text accumulated in the rolling buffer would otherwise be
+            # discarded here — emit it as the session's final transcript.
+            if self._rolling_text.strip():
+                self._emit(
+                    "final",
+                    text=self._rolling_text,
+                    language=self._rolling_language,
+                    confidence=self._rolling_confidence,
+                    start_ms=self._buffer_start_ms,
+                    end_ms=self._buffer_start_ms,
+                )
+                self._rolling_text = ""
+                self._rolling_confidence = 0.0
+                self._rolling_language = ""
             self._silence_count = 0
+            self._audio_bytes_processed = 0
+            self._last_draft_processed_bytes = 0
 
     def _discard_stride(self) -> None:
         stride = min(len(self._buffer), self.config.stride_bytes)
@@ -281,7 +293,8 @@ class StreamingSTT:
                     self._rolling_language = ""
                     self._silence_count = 0
         except Exception as exc:  # keep audio capture alive after a model error
-            self._emit("error", error=str(exc), start_ms=start_ms)
+            message = str(exc).strip() or type(exc).__name__
+            self._emit("error", error=f"Transcription failed: {message[:240]}", start_ms=start_ms)
 
     @staticmethod
     def _normalize_result(result) -> Tuple[str, str, float]:
@@ -322,7 +335,7 @@ class StreamingSTT:
     def _emit(self, kind: str, **kwargs) -> None:
         self._sequence += 1
         event = TranscriptEvent(kind=kind, sequence=self._sequence, **kwargs)
-        self._events.put(event)
+        self._events.append(event)
         if self._on_event:
             try:
                 self._on_event(event)
@@ -357,6 +370,30 @@ class StreamingSTT:
             if left_clean[-size:] == right_clean[:size]:
                 overlap = size
                 break
+
+        if overlap == 0:
+            # Fuzzy boundary matching: consecutive Whisper windows often
+            # transcribe the shared audio slightly differently ("text" vs
+            # "test") — exact word equality then fails and the overlap gets
+            # duplicated in the output.
+            try:
+                from difflib import SequenceMatcher
+
+                def similar(a: str, b: str) -> bool:
+                    if not a or not b:
+                        return False
+                    return SequenceMatcher(None, a, b).ratio() >= 0.72
+
+                max_fuzzy = min(len(left_clean), len(right_clean), 5)
+                for size in range(max_fuzzy, 0, -1):
+                    if all(
+                        similar(left_clean[-size + i], right_clean[i])
+                        for i in range(size)
+                    ):
+                        overlap = size
+                        break
+            except Exception:
+                pass
 
         if overlap > 0:
             tail = " ".join(right_words[overlap:]).strip()

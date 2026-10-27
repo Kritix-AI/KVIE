@@ -1,3 +1,6 @@
+import { isAndroid } from './androidKeyboard'
+import { getServiceBaseUrl } from './modelsApi'
+
 /**
  * KVIE Live Translation Engine (100+ Languages)
  * Powered by Local LLMs (Ollama Mistral / Phi-3 / Qwen) & Multi-Tier Fast Fallback
@@ -47,6 +50,7 @@ let cachedOllamaModel: string | null = null
 let lastModelCheckTime = 0
 
 async function getAvailableOllamaModel(): Promise<string | null> {
+  if (isAndroid()) return null
   const now = Date.now()
   if (cachedOllamaModel && now - lastModelCheckTime < 60000) {
     return cachedOllamaModel
@@ -55,7 +59,7 @@ async function getAvailableOllamaModel(): Promise<string | null> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 1200)
-    const res = await fetch('http://localhost:11434/api/tags', { signal: controller.signal })
+    const res = await fetch(`${getServiceBaseUrl()}/api/ollama/tags`, { signal: controller.signal })
     clearTimeout(timeout)
 
     if (res.ok) {
@@ -63,7 +67,9 @@ async function getAvailableOllamaModel(): Promise<string | null> {
       const models = data.models || []
       if (models.length > 0) {
         // Preferred models in priority order
-        const preferred = ['qwen2.5:1.5b', 'qwen', 'mistral:7b', 'mistral', 'phi3:mini', 'phi3', 'llama3', 'gemma']
+        // Prefer installed instruction models that return a final answer directly.
+        // Some Qwen reasoning variants spend their small token budget on hidden thoughts.
+        const preferred = ['qwen2.5:1.5b', 'mistral:7b', 'mistral', 'llama3.1', 'phi3:mini', 'phi3', 'qwen', 'gemma']
         for (const pref of preferred) {
           const found = models.find((m: { name?: string; model?: string }) => (m.name || m.model || '').toLowerCase().includes(pref))
           if (found) {
@@ -114,19 +120,15 @@ export async function translateText(
 
       const prompt = `Translate the following spoken sentence accurately into ${targetLangName}. Output ONLY the translated sentence with no commentary, no notes, and no quotes:\n\n"${trimmed}"`
 
-      const response = await fetch('http://localhost:11434/api/generate', {
+      const response = await fetch(`${getServiceBaseUrl()}/api/ollama/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
           model: ollamaModel,
           prompt,
-          stream: false,
-          options: {
-            temperature: 0.1,
-            top_p: 0.9,
-            num_predict: 180,
-          },
+          temperature: 0.1,
+          max_tokens: 180,
         }),
       })
 
@@ -138,30 +140,12 @@ export async function translateText(
         if (cleaned) return cleaned
       }
     } catch {
-      // Fallback to Tier 2
+      // Fall through to the original text
     }
   }
 
-  // Tier 2: Free Public MyMemory API Fallback (Auto-detect source -> target language)
-  try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 2000)
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=autodetect|${targetLangCode}`
-
-    const res = await fetch(url, { signal: controller.signal })
-    clearTimeout(timeoutId)
-
-    if (res.ok) {
-      const data = await res.json()
-      const translated = data.responseData?.translatedText
-      if (translated && !translated.startsWith('MYMEMORY WARNING')) {
-        const cleaned = sanitizeTranslationOutput(translated)
-        if (cleaned) return cleaned
-      }
-    }
-  } catch {
-    // Fallback
-  }
-
+  // KVIE is strictly local-first: there is deliberately NO cloud translation
+  // fallback. When no local Ollama model is available, the original text is
+  // returned untouched.
   return trimmed
 }

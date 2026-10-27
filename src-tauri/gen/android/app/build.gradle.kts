@@ -37,8 +37,8 @@ android {
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = System.getenv("KEYSTORE_KEY_PASSWORD")
                     ?: keystoreProps.getProperty("keyPassword")
-                enableV2Signing()
-                enableV3Signing()
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }

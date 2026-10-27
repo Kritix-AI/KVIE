@@ -17,6 +17,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.text.Editable
+import android.text.InputType
 import android.text.TextUtils
 import android.graphics.Color
 import android.graphics.Typeface
@@ -40,6 +41,7 @@ import android.widget.ScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,10 +70,9 @@ class KVIEInputMethodService : InputMethodService() {
     enum class Mode { TEXT, EMOJI, HINDI, SNIPPETS }
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var whisperEngine: WhisperEngine? = null
-    private var parakeetEngine: ParakeetEngine? = null
 
     private var isListening = false
+    private var isSensitiveInput = false
     private var isShifted = false
     private var isCapsLock = false
     private var isSymbolsMode = false
@@ -80,6 +81,9 @@ class KVIEInputMethodService : InputMethodService() {
     private var currentMode = Mode.TEXT        // TEXT | EMOJI | HINDI | SNIPPETS
     private var currentLang: Locale = Locale.ENGLISH
     private var lastBuffer = StringBuilder()
+    private var voiceCompositionActive = false
+    private var voiceCompositionHasText = false
+    private var voiceCompositionPrefix = ""
 
     // Top Voice & Suggestion Toolbar
     private lateinit var voiceToolbar: LinearLayout
@@ -110,6 +114,7 @@ class KVIEInputMethodService : InputMethodService() {
     )
     private var lastAutocorrectRecord: AutocorrectRecord? = null
     private val commonWordsSet by lazy { commonWords.map { it.lowercase() }.toHashSet() }
+    private val commonWordRanks by lazy { commonWords.withIndex().associate { it.value.lowercase() to it.index } }
 
     // ── Snippet map ────────────────────────────────────────────────────────────
     private val snippets = linkedMapOf(
@@ -231,10 +236,10 @@ class KVIEInputMethodService : InputMethodService() {
             if (typoCorrection != null && typoCorrection.equals(lower, ignoreCase = true)) {
                 96
             } else if (lower == typedLower && commonWordsSet.contains(lower)) {
-                val commonRank = commonWords.indexOfFirst { it.equals(lower, ignoreCase = true) }
+                val commonRank = commonWordRanks[lower] ?: -1
                 if (commonRank in 0..100) 94 else 85
             } else {
-                val rank = commonWords.indexOfFirst { it.equals(lower, ignoreCase = true) }
+                val rank = commonWordRanks[lower] ?: -1
                 when {
                     rank in 0..15 -> 88
                     rank in 16..60 -> 82
@@ -575,14 +580,13 @@ class KVIEInputMethodService : InputMethodService() {
     private var engineJob: Job? = null
 
     private val backspaceHandler = Handler(Looper.getMainLooper())
+    private var pendingSuggestionUpdate: Runnable? = null
     private var isBackspaceHolding = false
     private var keyboardRootView: View? = null
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        whisperEngine = WhisperEngine(this)
-        parakeetEngine = ParakeetEngine(this)
         AutoEditClient.init(this)
         initClipboardManager()
     }
@@ -667,17 +671,20 @@ class KVIEInputMethodService : InputMethodService() {
     private fun setupToolbarActions(view: View) {
         micButton.setOnClickListener {
             performKeyHaptic()
+            if (isSensitiveInput) return@setOnClickListener
             if (isListening) stopListening() else startListening()
         }
 
         micButton.setOnLongClickListener {
             performKeyHaptic()
+            if (isSensitiveInput) return@setOnLongClickListener true
             launchFloatingMicOverlay()
             true
         }
 
         polishButton.setOnClickListener {
             performKeyHaptic()
+            if (isSensitiveInput) return@setOnClickListener
             toggleAiActionsBar()
         }
 
@@ -780,6 +787,10 @@ class KVIEInputMethodService : InputMethodService() {
         keySpace.setOnClickListener {
             performKeyHaptic()
             val ic = currentInputConnection ?: return@setOnClickListener
+            if (isSensitiveInput) {
+                ic.commitText(" ", 1)
+                return@setOnClickListener
+            }
 
             // Record word for personal dictionary
             val textBefore = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
@@ -1264,7 +1275,7 @@ class KVIEInputMethodService : InputMethodService() {
     private fun tryTransliterate(word: String): String {
         if (currentLang.language != "hi") return word
 
-        val lower = word.lowercase(Locale.getDefault())
+        val lower = word.replace("Sh", "§").lowercase(Locale.getDefault()).replace("§", "Sh")
         var result = ""
         var i = 0
         while (i < lower.length) {
@@ -1319,6 +1330,44 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun updateSuggestions() {
+        pendingSuggestionUpdate?.let { backspaceHandler.removeCallbacks(it) }
+        if (isSensitiveInput) {
+            pendingSuggestionUpdate = null
+            if (::suggestion1.isInitialized) {
+                suggestion1.text = ""
+                suggestion2.text = ""
+                suggestion3.text = ""
+                suggestionBar.visibility = View.GONE
+            }
+            return
+        }
+        val update = Runnable {
+            pendingSuggestionUpdate = null
+            updateSuggestionsNow()
+        }
+        pendingSuggestionUpdate = update
+        backspaceHandler.postDelayed(update, 40L)
+    }
+
+    private fun commonPrefixMatches(prefix: String, limit: Int = 3, exclude: String = ""): List<String> {
+        val matches = ArrayList<String>(limit)
+        for (word in commonWords) {
+            if (word.startsWith(prefix, ignoreCase = true) && !word.equals(exclude, ignoreCase = true)) {
+                matches.add(word)
+                if (matches.size == limit) break
+            }
+        }
+        return matches
+    }
+
+    private fun updateSuggestionsNow() {
+        if (isSensitiveInput) {
+            suggestion1.text = ""
+            suggestion2.text = ""
+            suggestion3.text = ""
+            suggestionBar.visibility = View.GONE
+            return
+        }
         val ic = currentInputConnection ?: return
         val textBefore = ic.getTextBeforeCursor(80, 0)?.toString().orEmpty()
         val isSentenceStart = checkIsSentenceStart(textBefore.dropLastWhile { !it.isWhitespace() })
@@ -1358,7 +1407,7 @@ class KVIEInputMethodService : InputMethodService() {
 
         if (personalMatches.isNotEmpty() && personalMatches[0].equals(lower, ignoreCase = true)) {
             val c1 = formatSuggestion(personalMatches[0], currentWord, isSentenceStart)
-            val fallbackMatches = commonWords.filter { it.startsWith(lower, ignoreCase = true) && !it.equals(lower, ignoreCase = true) }
+            val fallbackMatches = commonPrefixMatches(lower, exclude = lower)
             val c2 = personalMatches.getOrNull(1)?.let { formatSuggestion(it, currentWord, isSentenceStart) }
                 ?: fallbackMatches.getOrNull(0)?.let { formatSuggestion(it, currentWord, isSentenceStart) }
                 ?: currentWord
@@ -1390,7 +1439,7 @@ class KVIEInputMethodService : InputMethodService() {
             val formatted = formatSuggestion(correction, currentWord, isSentenceStart)
             val c1 = formatted
             val c2 = currentWord // Keep literal
-            val matches = commonWords.filter { it.startsWith(lower, ignoreCase = true) && !it.equals(correction, ignoreCase = true) }
+            val matches = commonPrefixMatches(lower, exclude = correction)
             val c3 = matches.firstOrNull()?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: "..."
 
             suggestion1.text = c1
@@ -1417,7 +1466,7 @@ class KVIEInputMethodService : InputMethodService() {
                 val c1 = formatSuggestion(spatialCandidates[0], currentWord, isSentenceStart)
                 val c2 = currentWord // Keep literal typed
                 val secondSpatial = spatialCandidates.getOrNull(1)
-                val fallbackMatches = commonWords.filter { it.startsWith(lower, ignoreCase = true) }
+                val fallbackMatches = commonPrefixMatches(lower)
                 val c3 = secondSpatial?.let { formatSuggestion(it, currentWord, isSentenceStart) }
                     ?: fallbackMatches.firstOrNull()?.let { formatSuggestion(it, currentWord, isSentenceStart) }
                     ?: "..."
@@ -1434,9 +1483,9 @@ class KVIEInputMethodService : InputMethodService() {
 
         // Tier 4: Standard Prefix Autocomplete (Prioritizing Personal Lexicon matches)
         val candidatePool = if (personalMatches.isNotEmpty()) {
-            (personalMatches + commonWords.filter { it.startsWith(lower, ignoreCase = true) }).distinct()
+            (personalMatches + commonPrefixMatches(lower)).distinct()
         } else {
-            commonWords.filter { it.startsWith(lower, ignoreCase = true) }
+            commonPrefixMatches(lower)
         }
 
         val c1 = candidatePool.getOrNull(0)?.let { formatSuggestion(it, currentWord, isSentenceStart) } ?: currentWord
@@ -1462,6 +1511,7 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun applySuggestion(candidate: String) {
+        if (isSensitiveInput) return
         if (candidate.isBlank() || candidate == "...") return
         val ic = currentInputConnection ?: return
         performKeyHaptic()
@@ -1500,12 +1550,23 @@ class KVIEInputMethodService : InputMethodService() {
     private fun initClipboardManager() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener {
-            val clip = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
-            if (!clip.isNullOrBlank() && !recentClips.contains(clip)) {
-                recentClips.add(0, clip)
-                if (recentClips.size > 15) recentClips.removeAt(recentClips.size - 1)
-                refreshClipboardDrawer()
-            }
+            // Capture only after the user opens the drawer, and never while a
+            // sensitive field is active.
+            if (!isSensitiveInput && ::clipboardDrawer.isInitialized &&
+                clipboardDrawer.visibility == View.VISIBLE) captureCurrentClipboard()
+        }
+    }
+
+    private fun captureCurrentClipboard() {
+        val description = clipboardManager.primaryClipDescription ?: return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            description.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, false) == true) return
+        if (description.label?.toString() == "KVIE Voice") return
+        val clip = clipboardManager.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()?.trim()
+        if (!clip.isNullOrBlank() && !recentClips.contains(clip)) {
+            recentClips.add(0, clip)
+            if (recentClips.size > 15) recentClips.removeAt(recentClips.size - 1)
+            refreshClipboardDrawer()
         }
     }
 
@@ -1519,12 +1580,14 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun toggleClipboardDrawer() {
+        if (isSensitiveInput) return
         if (clipboardDrawer.visibility == View.VISIBLE) {
             clipboardDrawer.visibility = View.GONE
         } else {
             emojiDrawer.visibility = View.GONE
-            refreshClipboardDrawer()
             clipboardDrawer.visibility = View.VISIBLE
+            captureCurrentClipboard()
+            refreshClipboardDrawer()
         }
     }
 
@@ -2003,6 +2066,7 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun launchFloatingMicOverlay() {
+        if (isSensitiveInput) return
         if (!Settings.canDrawOverlays(this)) {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -2018,6 +2082,7 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun triggerAIPolish(style: String = "clean") {
+        if (isSensitiveInput) return
         val ic = currentInputConnection ?: return
         val textBefore = ic.getTextBeforeCursor(200, 0)?.toString() ?: ""
         if (textBefore.isBlank()) return
@@ -2025,6 +2090,7 @@ class KVIEInputMethodService : InputMethodService() {
         scope.launch {
             try {
                 val polished = AutoEditClient.refine(textBefore, this@KVIEInputMethodService)
+                if (isSensitiveInput) return@launch
                 if (polished != null && polished.isNotBlank() && polished != textBefore) {
                     ic.deleteSurroundingText(textBefore.length, 0)
                     ic.commitText(polished, 1)
@@ -2040,6 +2106,10 @@ class KVIEInputMethodService : InputMethodService() {
 
     // ───────────── SPEECH DICTATION ENGINE ─────────────
     private fun startListening() {
+        if (isSensitiveInput) {
+            Toast.makeText(this, "Voice input is disabled in sensitive fields", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
             val intent = Intent(this, SetupActivity::class.java).apply {
@@ -2076,21 +2146,25 @@ class KVIEInputMethodService : InputMethodService() {
                 }
 
                 override fun onError(error: Int) {
-                    stopListening()
+                    clearVoiceComposition()
+                    finishListeningUi()
                 }
 
                 override fun onResults(results: android.os.Bundle?) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     if (!matches.isNullOrEmpty()) {
                         handleFinalTranscript(matches[0])
+                    } else {
+                        clearVoiceComposition()
                     }
-                    stopListening()
+                    finishListeningUi()
                 }
 
                 override fun onPartialResults(partialResults: android.os.Bundle?) {
                     val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     if (!matches.isNullOrEmpty()) {
                         statusText.text = matches[0]
+                        updateVoiceComposition(matches[0])
                     }
                 }
 
@@ -2103,6 +2177,7 @@ class KVIEInputMethodService : InputMethodService() {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
+        beginVoiceComposition()
         speechRecognizer?.startListening(intent)
     }
 
@@ -2116,21 +2191,92 @@ class KVIEInputMethodService : InputMethodService() {
     }
 
     private fun stopListening() {
+        if (isListening) {
+            try {
+                speechRecognizer?.stopListening()
+                statusText.text = "Processing..."
+            } catch (_: Exception) {
+                clearVoiceComposition()
+                finishListeningUi()
+            }
+            return
+        }
+        finishListeningUi()
+    }
+
+    private fun finishListeningUi() {
         isListening = false
-        destroySpeechRecognizer()
+        try { speechRecognizer?.destroy() } catch (_: Exception) {}
+        speechRecognizer = null
         micButton.isSelected = false
         statusText.visibility = View.GONE
         suggestionBar.visibility = View.VISIBLE
         updateSuggestions()
     }
 
+    private fun beginVoiceComposition(): Boolean {
+        if (isSensitiveInput) return false
+        val ic = currentInputConnection ?: return false
+        if (!voiceCompositionActive) {
+            val previous = ic.getTextBeforeCursor(1, 0)?.toString().orEmpty()
+            voiceCompositionPrefix = if (previous.lastOrNull()?.isWhitespace() == false) " " else ""
+            voiceCompositionActive = true
+            voiceCompositionHasText = false
+        }
+        return true
+    }
+
+    private fun updateVoiceComposition(text: String): Boolean {
+        if (!beginVoiceComposition()) return false
+        val ic = currentInputConnection ?: return false
+        val applied = ic.setComposingText(voiceCompositionPrefix + text, 1)
+        voiceCompositionHasText = applied
+        return applied
+    }
+
+    private fun commitVoiceComposition(text: String): Boolean {
+        if (isSensitiveInput || text.isBlank()) {
+            clearVoiceComposition()
+            return false
+        }
+        if (!beginVoiceComposition()) return false
+        val ic = currentInputConnection ?: return false
+        val committed = voiceCompositionPrefix + text + " "
+        val success = if (ic.setComposingText(committed, 1)) {
+            ic.finishComposingText()
+            true
+        } else {
+            clearVoiceComposition()
+            ic.commitText(committed, 1)
+        }
+        voiceCompositionActive = false
+        voiceCompositionHasText = false
+        voiceCompositionPrefix = ""
+        updateSuggestions()
+        return success
+    }
+
+    private fun clearVoiceComposition() {
+        if (voiceCompositionHasText) {
+            currentInputConnection?.setComposingText("", 1)
+            currentInputConnection?.finishComposingText()
+        }
+        voiceCompositionActive = false
+        voiceCompositionHasText = false
+        voiceCompositionPrefix = ""
+    }
+
     private fun handleFinalTranscript(rawTranscript: String) {
-        if (rawTranscript.isBlank()) return
+        if (isSensitiveInput || rawTranscript.isBlank()) {
+            clearVoiceComposition()
+            return
+        }
         val ic = currentInputConnection ?: return
 
         // 1. Real-Time Voice Editing Command Interception
         val command = SmolLMEngine.parseVoiceCommand(rawTranscript)
         if (command != VoiceCommandType.NONE) {
+            clearVoiceComposition()
             performKeyHaptic()
             when (command) {
                 VoiceCommandType.DELETE_LAST_WORD -> {
@@ -2187,9 +2333,10 @@ class KVIEInputMethodService : InputMethodService() {
             ?: lastActivePackageName 
             ?: KVIEAccessibilityService.currentActivePackage
         val targetApp = SessionManager.resolveAppName(this, targetPkg)
-        val prefix = if (ic.getTextBeforeCursor(1, 0)?.endsWith(" ") == true || ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) "" else " "
-        ic.commitText(prefix + cleanText + " ", 1)
-        SessionManager.recordSession(this, cleanText, targetApp)
+        commitVoiceComposition(cleanText)
+        scope.launch(Dispatchers.IO) {
+            SessionManager.recordSession(this@KVIEInputMethodService, cleanText, targetApp)
+        }
 
         // Track voice dictation for Contextual Bandit self-learning
         val dictatedWords = cleanText.split(Regex("[^\\p{L}\\p{Nd}]+")).filter { it.isNotBlank() }
@@ -2207,22 +2354,32 @@ class KVIEInputMethodService : InputMethodService() {
 
         updateSuggestions()
 
-        scope.launch {
-            try {
-                val refined = AutoEditClient.refine(cleanText, this@KVIEInputMethodService)
-                if (refined != null && refined.isNotBlank() && refined != cleanText) {
-                    val oldLen = cleanText.length + 1
-                    ic.deleteSurroundingText(oldLen, 0)
-                    ic.commitText(prefix + refined + " ", 1)
-                    SessionManager.recordSession(this@KVIEInputMethodService, refined, "$targetApp (AI Polish)")
-                    updateSuggestions()
-                }
-            } catch (_: Exception) {}
-        }
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        isSensitiveInput = isSensitiveEditor(info)
+        if (isSensitiveInput) {
+            FloatingMicService.stopForSensitiveField()
+            stopListening()
+            engineJob?.cancel()
+            pendingVoiceValidationJob?.cancel()
+            lastDictatedWords = emptyList()
+            recentClips.clear()
+            lastCompletedWord = null
+            lastAutocorrectRecord = null
+            clipboardDrawer.visibility = View.GONE
+            aiActionsBar.visibility = View.GONE
+            suggestionBar.visibility = View.GONE
+            micButton.visibility = View.GONE
+            polishButton.visibility = View.GONE
+            btnClipboard.visibility = View.GONE
+        } else {
+            micButton.visibility = View.VISIBLE
+            polishButton.visibility = View.VISIBLE
+            btnClipboard.visibility = View.VISIBLE
+            suggestionBar.visibility = View.VISIBLE
+        }
         val pkg = info?.packageName
         if (!pkg.isNullOrBlank()) {
             lastActivePackageName = pkg
@@ -2242,6 +2399,20 @@ class KVIEInputMethodService : InputMethodService() {
         populateKeys()
         updateSuggestions()
         updateEnterKeyActionVisual()
+    }
+
+    private fun isSensitiveEditor(info: EditorInfo?): Boolean {
+        if (info == null) return false
+        val inputType = info.inputType
+        val inputClass = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+        val password = (inputClass == InputType.TYPE_CLASS_TEXT && variation in setOf(
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+        )) || (inputClass == InputType.TYPE_CLASS_NUMBER &&
+            variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+        return password || (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
     }
 
     private fun adaptAppTone(packageName: String) {
@@ -2280,6 +2451,7 @@ class KVIEInputMethodService : InputMethodService() {
         if (instance == this) instance = null
         stopListening()
         speechRecognizer?.destroy()
+        pendingSuggestionUpdate?.let { backspaceHandler.removeCallbacks(it) }
         backspaceHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
@@ -2289,7 +2461,18 @@ class KVIEInputMethodService : InputMethodService() {
         var lastActivePackageName: String? = null
         private const val IME_ACTION_NEWLINE_FALLBACK = -1
 
+        fun isCurrentInputSensitive(): Boolean = instance?.isSensitiveInput == true
+
+        fun beginVoiceComposition(): Boolean = instance?.beginVoiceComposition() ?: false
+
+        fun updateVoiceComposition(text: String): Boolean = instance?.updateVoiceComposition(text) ?: false
+
+        fun commitVoiceComposition(text: String): Boolean = instance?.commitVoiceComposition(text) ?: false
+
+        fun clearVoiceComposition() { instance?.clearVoiceComposition() }
+
         fun commitFromExternal(text: String): Boolean {
+            if (isCurrentInputSensitive()) return false
             return instance?.directCommitText(text) ?: false
         }
     }

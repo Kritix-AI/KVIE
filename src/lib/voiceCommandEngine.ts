@@ -1,3 +1,6 @@
+import { isAndroid } from './androidKeyboard'
+import { getServiceBaseUrl } from './modelsApi'
+
 /**
  * KVIE Voice Command Execution Engine
  * Powered by Qwen2.5-1.5B-Instruct & IUIAutomation Context
@@ -33,13 +36,16 @@ export async function executeVoiceCommand(
     return { transformedText: existingText, isSuccess: false }
   }
 
-  const contextText = existingText.trim()
+  // Sanitize inputs — strip control characters, cap lengths
+  const safeCommand = commandText.replace(/[\x00-\x1F\x7F]/g, ' ').trim().slice(0, 500)
+  const safeApp = appName.replace(/[\x00-\x1F\x7F]/g, ' ').trim().slice(0, 100)
+  const contextText = existingText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
 
   const systemPrompt = `You are KVIE's Voice Command Engine powered by Qwen2.5-1.5B.
 Your task is to execute the user's voice instruction on the provided target text.
 
-Target Application: ${appName}
-Voice Instruction: "${commandText}"
+Target Application: ${safeApp}
+Voice Instruction: "${safeCommand}"
 
 [EXISTING TARGET TEXT]:
 "${contextText.slice(0, 800)}"
@@ -51,22 +57,19 @@ STRICT RULES:
 4. Output ONLY the resulting transformed text. Do NOT add commentary, introductions, or quotes.`
 
   try {
+    if (isAndroid()) throw new Error('Android uses its local keyboard engine')
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 2200)
 
-    const response = await fetch('http://localhost:11434/api/generate', {
+    const response = await fetch(`${getServiceBaseUrl()}/api/ollama/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
         model: 'qwen2.5:1.5b',
         prompt: systemPrompt,
-        stream: false,
-        options: {
-          temperature: 0.2,
-          top_p: 0.9,
-          num_predict: 300,
-        },
+        temperature: 0.2,
+        max_tokens: 300,
       }),
     })
 
@@ -74,7 +77,7 @@ STRICT RULES:
 
     if (response.ok) {
       const data = await response.json()
-      const result = (data.response || '').trim().replace(/^["']|["']$/g, '')
+      const result = (data.response || '').trim().replace(/^["']|["']$/g, '').slice(0, 4000)
       if (result.length > 0) {
         return { transformedText: result, isSuccess: true }
       }

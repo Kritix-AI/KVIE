@@ -12,6 +12,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -32,12 +35,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Floating Voice Mic Bubble Service.
  *
  * Architecture:
- * - Uses WhisperEngine (Silero VAD + HTTP Whisper backend) instead of Google SpeechRecognizer
- * - Streams partial transcription results in real-time
+ * - Uses the Android system SpeechRecognizer and streams partial results
  * - Direct injection into active app via IME or Accessibility Service
  *
  * Gestures:
- * 1. Single Tap: Start / Stop Voice Dictation with on-device SmolLM2 refinement.
+ * 1. Single Tap: Start / Stop Voice Dictation with local rule-based cleanup.
  * 2. Hold (Long Press): Open full keyboard.
  * 3. Drag: Move anywhere on screen, or drag to bottom trash zone to dismiss.
  */
@@ -51,7 +53,7 @@ class FloatingMicService : Service() {
     private var bubbleMicIcon: ImageView? = null
     private var statusLabel: TextView? = null
 
-    private var whisperEngine: WhisperEngine? = null
+    private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
     private var currentPartial = ""
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -60,19 +62,13 @@ class FloatingMicService : Service() {
     private var isLongPressed = false
     private val isProcessing = AtomicBoolean(false)
 
-    // Backend URLs to try (same as AutoEditClient)
-    private val backendUrls = listOf(
-        "http://127.0.0.1:8765",
-        "http://10.0.2.2:8765",
-        "http://192.168.1.3:8765"
-    )
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        AutoEditClient.init(this)
         createFloatingBubble()
     }
 
@@ -208,101 +204,103 @@ class FloatingMicService : Service() {
         imm?.showInputMethodPicker()
     }
 
-    // ─── Whisper Engine Integration ──────────────────────────────────────────
-
-    private fun getWhisperEngine(): WhisperEngine? {
-        if (whisperEngine == null) {
-            // Try to find the working backend URL
-            val workingUrl = backendUrls.firstOrNull { checkBackend(it) } ?: backendUrls[0]
-            whisperEngine = WhisperEngine(this).configure(
-                backendUrl = workingUrl,
-                silenceTimeoutMs = 1200,
-                minSpeechMs = 250,
-                vadThreshold = 0.5f
-            )
-        }
-        return whisperEngine
-    }
-
-    private fun checkBackend(url: String): Boolean {
-        return try {
-            val conn = java.net.URL("$url/health").openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 500
-            conn.readTimeout = 500
-            conn.responseCode == 200
-        } catch (_: Exception) {
-            false
-        }
-    }
+    // ─── Android Speech Recognition ──────────────────────────────────────────
 
     private fun toggleListening() {
         if (isProcessing.get() && !isListening) {
             Toast.makeText(this, "Still processing previous result...", Toast.LENGTH_SHORT).show()
             return
         }
-
-        if (isListening) {
-            stopListening()
-        } else {
-            startListening()
-        }
+        if (isListening) stopListening() else startListening()
     }
 
     private fun startListening() {
-        if (isListening) return
-
-        val engine = getWhisperEngine() ?: run {
-            Toast.makeText(this, "Whisper engine not available", Toast.LENGTH_SHORT).show()
+        if (KVIEInputMethodService.isCurrentInputSensitive()) {
+            Toast.makeText(this, "Voice input is disabled in sensitive fields", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Allow microphone access in KVIE settings", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "No speech recognition service is installed", Toast.LENGTH_LONG).show()
             return
         }
 
+        destroySpeechRecognizer()
         isListening = true
         currentPartial = ""
         updateBubbleActiveState(true)
         showStatus("Listening...")
-
-        scope.launch {
-            engine.startTranscription(
-                onPartial = { partial ->
-                    currentPartial = partial
-                    showStatus("Hearing: ${partial.take(40)}${if (partial.length > 40) "..." else ""}")
-                },
-                onFinal = { text ->
-                    handleFinalTranscript(text)
-                },
-                onError = { error ->
-                    Log.e("FloatingMic", "Transcription error: $error")
-                    showStatus("Error: $error")
-                    resetListeningState()
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: android.os.Bundle?) { showStatus("Listening...") }
+                    override fun onBeginningOfSpeech() { showStatus("Dictating...") }
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() { showStatus("Processing...") }
+                    override fun onError(error: Int) {
+                        Log.w("FloatingMic", "System speech recognition failed: $error")
+                        KVIEInputMethodService.clearVoiceComposition()
+                        resetListeningState()
+                        if (error != SpeechRecognizer.ERROR_CLIENT && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && error != SpeechRecognizer.ERROR_NO_MATCH) {
+                            showStatus("Speech recognition failed")
+                        }
+                    }
+                    override fun onResults(results: android.os.Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) handleFinalTranscript(matches[0]) else {
+                            KVIEInputMethodService.clearVoiceComposition()
+                            resetListeningState()
+                        }
+                    }
+                    override fun onPartialResults(partialResults: android.os.Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            currentPartial = matches[0]
+                            KVIEInputMethodService.updateVoiceComposition(currentPartial)
+                            showStatus("Hearing: ${currentPartial.take(40)}${if (currentPartial.length > 40) "..." else ""}")
+                        }
+                    }
+                    override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+                })
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 }
-            )
+                KVIEInputMethodService.beginVoiceComposition()
+                startListening(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("FloatingMic", "Could not start system speech recognition", e)
+            KVIEInputMethodService.clearVoiceComposition()
+            resetListeningState()
+            Toast.makeText(this, "Could not start speech recognition", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun stopListening() {
-        val engine = whisperEngine
-        if (engine != null && isListening) {
-            scope.launch {
-                try {
-                    val finalText = engine.stopTranscription()
-                    if (finalText.isNotBlank() && finalText != currentPartial) {
-                        handleFinalTranscript(finalText)
-                    } else if (currentPartial.isNotBlank()) {
-                        handleFinalTranscript(currentPartial)
-                    }
-                } catch (e: Exception) {
-                    Log.e("FloatingMic", "Stop error: ${e.message}")
-                }
-                resetListeningState()
-            }
+        if (isListening) {
+            try { speechRecognizer?.stopListening() } catch (_: Exception) { resetListeningState() }
         } else {
             resetListeningState()
         }
     }
 
+    private fun destroySpeechRecognizer() {
+        try {
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        speechRecognizer = null
+    }
     private fun resetListeningState() {
         isListening = false
         currentPartial = ""
+        destroySpeechRecognizer()
         updateBubbleActiveState(false)
         showStatus("")
     }
@@ -310,18 +308,27 @@ class FloatingMicService : Service() {
     // ─── Transcript Handling ─────────────────────────────────────────────────
 
     private fun handleFinalTranscript(raw: String) {
+        if (KVIEInputMethodService.isCurrentInputSensitive()) {
+            isProcessing.set(false)
+            KVIEInputMethodService.clearVoiceComposition()
+            resetListeningState()
+            return
+        }
         if (raw.isBlank()) {
+            KVIEInputMethodService.clearVoiceComposition()
             resetListeningState()
             return
         }
 
         isProcessing.set(true)
         resetListeningState()
-        showStatus("Polishing...")
+        showStatus("Writing...")
 
         scope.launch {
             try {
-                val stripped = SmolLMEngine.stripFillersAndPunctuate(raw)
+                val stripped = withContext(Dispatchers.Default) {
+                    SmolLMEngine.stripFillersAndPunctuate(raw)
+                }
 
                 if (stripped.isBlank()) {
                     isProcessing.set(false)
@@ -329,8 +336,15 @@ class FloatingMicService : Service() {
                     return@launch
                 }
 
-                // Try direct injection via IME first
-                var typed = KVIEInputMethodService.commitFromExternal(stripped)
+                if (KVIEInputMethodService.isCurrentInputSensitive()) {
+                    isProcessing.set(false)
+                    KVIEInputMethodService.clearVoiceComposition()
+                    showStatus("")
+                    return@launch
+                }
+
+                // Replace the active IME composing region so each partial is shown in place.
+                var typed = KVIEInputMethodService.commitVoiceComposition(stripped)
 
                 // Fall back to Accessibility injection
                 if (!typed) {
@@ -338,7 +352,9 @@ class FloatingMicService : Service() {
                 }
 
                 val targetApp = KVIEAccessibilityService.getActiveAppName(this@FloatingMicService)
-                SessionManager.recordSession(this@FloatingMicService, stripped, targetApp)
+                scope.launch(Dispatchers.IO) {
+                    SessionManager.recordSession(this@FloatingMicService, stripped, targetApp)
+                }
 
                 // If neither injection worked, copy to clipboard and guide user
                 if (!typed) {
@@ -364,7 +380,7 @@ class FloatingMicService : Service() {
                 // Feed to Contextual Bandit for learning
                 val words = stripped.split(Regex("[^\\p{L}\\p{Nd}]+")).filter { it.isNotBlank() }
                 if (words.isNotEmpty()) {
-                    scope.launch {
+                    scope.launch(Dispatchers.IO) {
                         val db = UserLexiconDatabase.getInstance(this@FloatingMicService)
                         words.forEach { db.recordWordTyped(it) }
                         delay(100)
@@ -372,19 +388,10 @@ class FloatingMicService : Service() {
                     }
                 }
 
-                // AI polish
-                val polished = AutoEditClient.refine(stripped, this@FloatingMicService) ?: stripped
-                if (polished != stripped) {
-                    SessionManager.recordSession(this@FloatingMicService, polished, "$targetApp (AI Polish)")
-                    val updatedIme = KVIEInputMethodService.commitFromExternal(polished)
-                    if (!updatedIme) {
-                        KVIEAccessibilityService.typeText(polished)
-                    }
-                }
-
                 showStatus("")
             } catch (e: Exception) {
                 Log.e("FloatingMic", "Handle transcript error: ${e.message}")
+                KVIEInputMethodService.clearVoiceComposition()
                 showStatus("")
             } finally {
                 isProcessing.set(false)
@@ -413,9 +420,10 @@ class FloatingMicService : Service() {
     }
 
     override fun onDestroy() {
+        if (instance == this) instance = null
         scope.cancel()
         mainScope.cancel()
-        whisperEngine?.release()
+        destroySpeechRecognizer()
         if (floatingView != null) {
             windowManager?.removeView(floatingView)
             floatingView = null
@@ -425,5 +433,19 @@ class FloatingMicService : Service() {
             trashView = null
         }
         super.onDestroy()
+    }
+
+    private fun stopForSensitiveInput() {
+        if (!isListening) return
+        KVIEInputMethodService.clearVoiceComposition()
+        resetListeningState()
+    }
+
+    companion object {
+        private var instance: FloatingMicService? = null
+
+        fun stopForSensitiveField() {
+            instance?.stopForSensitiveInput()
+        }
     }
 }

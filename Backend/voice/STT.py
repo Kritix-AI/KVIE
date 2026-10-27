@@ -39,11 +39,60 @@ _DATA_DIR    = os.path.join(_ROOT, "Data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 
+def _register_nvidia_dlls() -> None:
+    """Make cuBLAS/cuDNN from the ``nvidia-cublas-cu12`` / ``nvidia-cudnn-cu12``
+    pip wheels loadable for CTranslate2 GPU inference. Without this, CUDA model
+    load succeeds but the first inference dies with
+    "Library cublas64_12.dll is not found" and KVIE silently falls back to CPU.
+    """
+    try:
+        import site
+        seen = set()
+        search_paths = []
+        try:
+            search_paths.extend(site.getsitepackages())
+        except Exception:
+            pass
+        try:
+            search_paths.append(site.getusersitepackages())
+        except Exception:
+            pass
+        for sp in search_paths:
+            nvidia_dir = os.path.join(sp, "nvidia")
+            if not os.path.isdir(nvidia_dir) or nvidia_dir in seen:
+                continue
+            seen.add(nvidia_dir)
+            for root, _dirs, files in os.walk(nvidia_dir):
+                if any(f.lower().endswith(".dll") for f in files):
+                    try:
+                        os.add_dll_directory(root)
+                    except OSError:
+                        pass
+                    # CTranslate2 loads CUDA libraries with plain LoadLibrary
+                    # semantics, which search PATH but not add_dll_directory.
+                    os.environ["PATH"] = root + os.pathsep + os.environ.get("PATH", "")
+    except Exception:
+        pass
+
+
+_register_nvidia_dlls()
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
+
+def _cuda_available() -> bool:
+    """True when a usable CUDA device is present (GPU acceleration is optional;
+    everything runs on CPU otherwise)."""
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
 
 @dataclass
 class STTConfig:
-    model_name: str = "large-v3-turbo"
+    model_name: str = "kritix-stt"
     sample_rate: int = 16000
     device: str = "cuda"
     skip_vad: bool = True  # faster-whisper has built-in VAD, skip Silero double-filter
@@ -52,15 +101,21 @@ class STTConfig:
     def from_env(cls):
         from dotenv import dotenv_values
         env = dotenv_values(os.path.join(_ROOT, ".env"))
+        configured_model = (
+            env.get("ASRModel")
+            or env.get("WhisperModel")
+            or env.get("WhisperModelSize")
+            or "kritix-stt"
+        )
+        if configured_model != "kritix-stt":
+            configured_model = "kritix-stt"
+        # An explicit ASRDevice wins; otherwise auto-detect so the GPU is used
+        # when present and CPU works out of the box when it is not.
+        device = env.get("ASRDevice") or env.get("WhisperDevice") or ("cuda" if _cuda_available() else "cpu")
         return cls(
-            model_name=(
-                env.get("ASRModel")
-                or env.get("WhisperModel")
-                or env.get("WhisperModelSize")
-                or "large-v3-turbo"
-            ),
+            model_name=configured_model,
             sample_rate=int(env.get("STTSampleRate") or "16000"),
-            device=env.get("ASRDevice") or env.get("WhisperDevice") or "cuda",
+            device=device,
         )
 
 
@@ -68,7 +123,13 @@ class STTConfig:
 
 _asr_model = None
 _asr_engine_type = None  # "faster_whisper" or "openai_whisper"
+_loaded_device: Optional[str] = None  # device the active model actually runs on
 _stt_lock  = threading.Lock()
+
+
+def get_active_device() -> Optional[str]:
+    """Device of the currently loaded model ('cuda'/'cpu'), or None if unloaded."""
+    return _loaded_device if _asr_model is not None else None
 
 
 def get_model(config: Optional[STTConfig] = None):
@@ -76,7 +137,18 @@ def get_model(config: Optional[STTConfig] = None):
     if _asr_model is not None:
         return _asr_model
 
+    # Double-checked locking: two concurrent sessions must not both construct
+    # a WhisperModel (the loser leaked its model and the last write won).
+    with _stt_lock:
+        if _asr_model is not None:
+            return _asr_model
+        return _load_model_locked(config)
+
+
+def _load_model_locked(config: Optional[STTConfig]):
+    global _asr_model, _asr_engine_type, _loaded_device
     cfg = config or STTConfig.from_env()
+    used_device = cfg.device
     print(f"[STT] Loading Whisper model: {cfg.model_name} on {cfg.device}", flush=True)
 
     # 1. Try faster-whisper CTranslate2 Engine (Ultra Fast)
@@ -86,47 +158,83 @@ def get_model(config: Optional[STTConfig] = None):
         env = dotenv_values(os.path.join(_ROOT, ".env"))
         compute_type = env.get("WhisperComputeType") or ("float16" if cfg.device == "cuda" else "int8")
         
-        from Backend.voice.ModelManager import MODEL_REPO_MAP
+        from Backend.voice.ModelManager import get_model_snapshot_path
         raw_name = cfg.model_name
-        target_model = MODEL_REPO_MAP.get(raw_name, raw_name)
+        target_model = get_model_snapshot_path(raw_name)
+        if target_model is None:
+            raise FileNotFoundError(
+                f"The selected speech model '{raw_name}' has no complete local model.bin snapshot. "
+                "Download it from the Models page, then retry."
+            )
 
         try:
-            _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
-        except Exception:
-            if target_model in ["large-v3-turbo", "turbo", "large-v3-turbo-ct2"]:
-                target_model = "deepdml/faster-whisper-large-v3-turbo-ct2"
-                _asr_model = WhisperModel(target_model, device=cfg.device, compute_type=compute_type)
-            else:
-                _asr_model = WhisperModel(raw_name, device=cfg.device, compute_type=compute_type)
+            _asr_model = WhisperModel(
+                target_model,
+                device=cfg.device,
+                compute_type=compute_type,
+                local_files_only=True,
+            )
+        except Exception as device_error:
+            if cfg.device == "cpu":
+                raise device_error
+            # Windows PCs without a usable CUDA/cuDNN stack can still run the
+            # selected cached model on CPU. Loading stays local-only so model
+            # downloads always go through the visible model manager.
+            _asr_model = WhisperModel(
+                target_model,
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=max(4, os.cpu_count() or 4),
+                local_files_only=True,
+            )
+            used_device = "cpu"
+
+        # CTranslate2 can accept a CUDA model even when its CUDA libraries
+        # (for example cuBLAS) are unavailable; the error then appears only
+        # on the first transcription. Probe one tiny silent sample at load
+        # time so that this machine reliably falls back to CPU before audio
+        # capture starts.
+        if cfg.device != "cpu":
+            try:
+                import numpy as np
+                probe_segments, _ = _asr_model.transcribe(
+                    np.zeros(16000, dtype=np.float32),
+                    language="en",
+                    beam_size=1,
+                    vad_filter=False,
+                )
+                next(iter(probe_segments), None)
+            except Exception as device_error:
+                print(
+                    f"[STT] CUDA inference unavailable ({type(device_error).__name__}); "
+                    "reloading the selected model on CPU",
+                    flush=True,
+                )
+                _asr_model = WhisperModel(
+                    target_model,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=max(4, os.cpu_count() or 4),
+                    local_files_only=True,
+                )
+                used_device = "cpu"
+                compute_type = "int8 (CPU fallback)"
 
         _asr_engine_type = "faster_whisper"
-        print(f"[STT] Loaded faster-whisper CTranslate2 model ({target_model}, compute_type={compute_type})", flush=True)
+        _loaded_device = used_device
+        print(f"[STT] Loaded faster-whisper CTranslate2 model ({target_model}, device={_loaded_device}, compute_type={compute_type})", flush=True)
         return _asr_model
     except Exception as e:
         print(f"[STT] faster-whisper load notice: {e}", flush=True)
 
-    # 2. Fallback to OpenAI PyTorch Whisper (openai-whisper)
-    try:
-        import whisper
-        try:
-            _asr_model = whisper.load_model(cfg.model_name, device=cfg.device)
-        except Exception as device_err:
-            if cfg.device != "cpu":
-                print(f"[STT] whisper load on {cfg.device} notice: {device_err}. Falling back to CPU...", flush=True)
-                _asr_model = whisper.load_model(cfg.model_name, device="cpu")
-            else:
-                raise device_err
-        _asr_engine_type = "openai_whisper"
-        print(f"[STT] Loaded openai-whisper (PyTorch) model ({cfg.model_name})", flush=True)
-        return _asr_model
-    except Exception as e:
-        print(f"[STT] openai-whisper load notice: {e}", flush=True)
-
+    # Do not let a missing CTranslate2 model trigger an untracked PyTorch model
+    # download. ModelManager is the sole download path and reports progress.
     return None
 
 
 def is_loaded() -> bool:
-    return get_model() is not None
+    """Return current load state without triggering model loading or network IO."""
+    return _asr_model is not None
 
 
 # ── Silero VAD Pre-filter ─────────────────────────────────────────────────────
@@ -240,9 +348,11 @@ SAFE_CORRECTIONS = {
 
 
 def correct_text(text: str) -> str:
-    t = re.sub(r"\s+", " ", text.lower()).strip()
+    # Apply brand/typo corrections WITHOUT flattening case — the old
+    # text.lower() destroyed capitalization for every HTTP-transcribed final.
+    t = re.sub(r"\s+", " ", text).strip()
     for wrong, right in SAFE_CORRECTIONS.items():
-        t = re.sub(rf"\b{re.escape(wrong)}\b", right, t)
+        t = re.sub(rf"\b{re.escape(wrong)}\b", right, t, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -314,7 +424,10 @@ def transcribe(audio: bytes, duration: float = 0.0, language: str = "auto") -> s
         if len(arr) < int(0.3 * 16000):  # Less than 0.3s of speech
             return ""
 
-        lang_arg = None if language == "auto" else language
+        # "hinglish" is a KVIE-level pseudo-language (Roman-script Hindi+English);
+        # faster-whisper would reject it, so it maps to auto-detect with the
+        # Hinglish-biased initial prompt.
+        lang_arg = None if language in ("auto", "hinglish") else language
 
         if _asr_engine_type == "faster_whisper":
             # First pass: fast beam_size=1
@@ -374,8 +487,11 @@ def _transcribe_faster_whisper(model, arr, lang_arg, beam_size: int = 1):
     text = re.sub(r"\s+", " ", text).strip()
 
     # Calculate confidence from average log probability
+    # NOTE: faster-whisper's Segment attribute is `avg_logprob` (no underscore) —
+    # the old `avg_log_prob` raised AttributeError inside the caller's try/except,
+    # which silently returned empty text for EVERY transcription.
     if all_segments:
-        avg_log_prob = sum(s.avg_log_prob for s in all_segments) / len(all_segments)
+        avg_log_prob = sum(s.avg_logprob for s in all_segments) / len(all_segments)
         # Convert log probability to 0-1 confidence score
         confidence = min(1.0, max(0.0, 1.0 + avg_log_prob / 2.0))
     else:
@@ -388,7 +504,7 @@ def _transcribe_faster_whisper(model, arr, lang_arg, beam_size: int = 1):
 
 
 def transcribe_with_confidence(
-    audio: bytes, duration: float = 0.0, language: str = "auto"
+    audio: bytes, duration: float = 0.0, language: str = "auto", retry: bool = True
 ) -> Tuple[str, float]:
     """Transcribe PCM and return ``(text, confidence)``.
 
@@ -409,10 +525,13 @@ def transcribe_with_confidence(
         if len(arr) < int(0.3 * 16000):
             return "", 0.0
 
-        lang_arg = None if language == "auto" else language
+        lang_arg = None if language in ("auto", "hinglish") else language
         if _asr_engine_type == "faster_whisper":
             text, confidence = _transcribe_faster_whisper(model, arr, lang_arg, 1)
-            if confidence < 0.65 and duration > 1.0 and len(arr) > 16000:
+            # The beam-5 retry is for one-shot HTTP transcribes only: on the
+            # CPU fallback it can run for tens of seconds, and in the streaming
+            # path it blocks the worker so the flush never completes.
+            if retry and confidence < 0.65 and duration > 1.0 and len(arr) > 16000:
                 retry_text, retry_confidence = _transcribe_faster_whisper(model, arr, lang_arg, 5)
                 if retry_confidence > confidence:
                     text, confidence = retry_text, retry_confidence
@@ -627,11 +746,6 @@ def SpeechRecognition(previous_text: str = "") -> str:
         return ""
     finally:
         _set_mic("OFF")
-        try:
-            if wake_detector:
-                wake_detector.resume()
-        except Exception:
-            pass
 
 
 def detect_voice_emotion(pcm: bytes, sample_rate: int = 16000) -> str:

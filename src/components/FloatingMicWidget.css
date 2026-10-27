@@ -1,9 +1,11 @@
-/* ═══════════════════════════════════════════════════════════════
-   FLOATING MIC WIDGET v3 — Compact Pill (iOS / macOS style)
-   ═══════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════
+   COMPACT TOP BORDER CAMERA NOTCH WITH CURVED FLARED WINGS
+   ══════════════════════════════════════════════════════════════════════ */
 
-/* Transparent window background */
-html, body, #root {
+/* Transparent root canvas */
+html.floating-window-mode,
+body.floating-window-mode,
+body.floating-window-mode #root {
   background: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -12,351 +14,344 @@ html, body, #root {
   height: 100% !important;
 }
 
-/* ── Theme Variables ─────────────────────────────────────────── */
-.pill-dark {
-  --pill-bg: rgba(28, 28, 30, 0.82);
-  --pill-border: rgba(255, 255, 255, 0.10);
-  --pill-shadow: 0 4px 24px rgba(0, 0, 0, 0.45), 0 0 1px rgba(255, 255, 255, 0.08);
-  --pill-btn-bg: rgba(255, 255, 255, 0.08);
-  --pill-btn-hover: rgba(255, 255, 255, 0.16);
-  --pill-btn-ghost: rgba(255, 255, 255, 0.06);
-  --pill-text: #f5f5f7;
-  --pill-text-muted: #8e8e93;
-  --pill-tip-bg: rgba(44, 44, 46, 0.94);
-  --pill-tip-text: #f5f5f7;
-  --pill-accent: #0a84ff;
-  --pill-divider: rgba(255, 255, 255, 0.08);
-  --pill-mic-shadow: 0 3px 12px rgba(10, 132, 255, 0.35);
-  --pill-mic-glow: 0 0 0 3px rgba(10, 132, 255, 0.15);
-}
-
-.pill-light {
-  --pill-bg: rgba(242, 242, 247, 0.82);
-  --pill-border: rgba(0, 0, 0, 0.08);
-  --pill-shadow: 0 4px 24px rgba(0, 0, 0, 0.10), 0 0 1px rgba(0, 0, 0, 0.06);
-  --pill-btn-bg: rgba(0, 0, 0, 0.04);
-  --pill-btn-hover: rgba(0, 0, 0, 0.08);
-  --pill-btn-ghost: rgba(0, 0, 0, 0.03);
-  --pill-text: #1c1c1e;
-  --pill-text-muted: #8e8e93;
-  --pill-tip-bg: rgba(255, 255, 255, 0.94);
-  --pill-tip-text: #1c1c1e;
-  --pill-accent: #007aff;
-  --pill-divider: rgba(0, 0, 0, 0.08);
-  --pill-mic-shadow: 0 3px 12px rgba(0, 122, 255, 0.25);
-  --pill-mic-glow: 0 0 0 3px rgba(0, 122, 255, 0.1);
-}
-
-/* ── Pill Container ──────────────────────────────────────────── */
-.pill-container {
-  display: inline-flex;
+/* ── Top Dock Wrapper (Always Centered) ────────────────────────────── */
+.notch-dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 5px 6px;
-  background: var(--pill-bg);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid var(--pill-border);
-  border-radius: 9999px;
-  box-shadow: var(--pill-shadow);
+  justify-content: flex-start;
+  margin: 0 auto;
   user-select: none;
   -webkit-user-select: none;
+  transition: height 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+  overflow: visible;
+}
+
+/* ── SVG Backdrop Layer (Smooth Height Transition via Container) ───── */
+/* NOTE: no `backdrop-filter` here — on a transparent Tauri window it paints
+   an opaque translucent film over the whole window rectangle. */
+.notch-svg-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.45));
+  overflow: visible;
+}
+
+/* ── Interactive Content Layer (Masks & Transitions with Notch) ─────── */
+.notch-content-container {
   position: relative;
-  transition: box-shadow 0.3s, border-color 0.3s;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  z-index: 5;
+  overflow: hidden;
 }
 
-.pill-container:hover {
-  box-shadow: var(--pill-shadow), 0 0 0 1px var(--pill-border);
+/* ── Smooth Fade States (Symmetrical with Height Expansion) ─────────── */
+.notch-fade-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.18s ease;
 }
 
-/* ── Listening State ─────────────────────────────────────────── */
-.pill-listening {
-  border-color: rgba(255, 69, 58, 0.35);
-  box-shadow: 0 4px 24px rgba(255, 69, 58, 0.15), 0 0 0 1px rgba(255, 69, 58, 0.1);
+.notch-fade-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }
 
-/* ── Buttons ─────────────────────────────────────────────────── */
-.pill-btn {
+/* ── Collapsed State (Top Lip Bar) ─────────────────────────────────── */
+.notch-collapsed-state {
+  cursor: pointer;
+}
+
+.notch-collapsed-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notch-collapsed-glow-dot {
+  width: 24px;
+  height: 2px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #00f0ff, #c084fc);
+  opacity: 0.85;
+  box-shadow: 0 0 5px rgba(0, 240, 255, 0.5), 0 0 8px rgba(192, 132, 252, 0.35);
+}
+
+/* ── Expanded State Control Row (Mathematically Balanced & Centered) ── */
+.notch-control-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 32px;
+  padding: 0 18px; /* Inside flared wings */
+  box-sizing: border-box;
+}
+
+/* ── Left: Compact Circular Mic Button (32px width for symmetry) ───── */
+.notch-mic-unit {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  background: transparent;
-  color: var(--pill-text-muted);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  outline: none;
+  height: 100%;
   flex-shrink: 0;
-  -webkit-tap-highlight-color: transparent;
 }
 
-.pill-btn:active {
-  transform: scale(0.9);
-}
-
-.pill-btn:hover {
-  background: var(--pill-btn-hover);
-  color: var(--pill-text);
-}
-
-/* Close button */
-.pill-btn-close {
-  width: 26px;
-  height: 26px;
-  min-width: 26px;
-  min-height: 26px;
-  opacity: 0.5;
-}
-
-.pill-btn-close:hover {
-  opacity: 0.9;
-  color: #ff453a;
-}
-
-/* Mic button — primary, larger, blue */
-.pill-btn-mic {
-  width: 38px;
-  height: 38px;
-  min-width: 38px;
-  min-height: 38px;
-  background: var(--pill-accent);
+.notch-btn-mic {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.1px solid rgba(139, 92, 246, 0.5);
+  background: radial-gradient(
+    circle,
+    rgba(139, 92, 246, 0.35) 0%,
+    rgba(56, 189, 248, 0.16) 70%,
+    rgba(9, 11, 22, 0.85) 100%
+  );
   color: #ffffff;
-  box-shadow: var(--pill-mic-shadow);
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.35),
+              inset 0 0 5px rgba(56, 189, 248, 0.2);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0;
 }
 
-.pill-btn-mic:hover {
-  box-shadow: var(--pill-mic-shadow), var(--pill-mic-glow);
-  transform: scale(1.05);
+.notch-btn-mic:hover {
+  transform: scale(1.06);
+  border-color: rgba(0, 240, 255, 0.85);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.5),
+              inset 0 0 7px rgba(139, 92, 246, 0.35);
 }
 
-.pill-btn-mic:active {
-  transform: scale(0.94);
+.notch-btn-mic:active {
+  transform: scale(0.93);
 }
 
-.pill-btn-mic-active {
-  background: #ff453a;
-  box-shadow: 0 3px 12px rgba(255, 69, 58, 0.4);
+/* Active Recording Glow */
+.notch-btn-mic-live {
+  border-color: rgba(239, 68, 68, 0.85);
+  background: radial-gradient(
+    circle,
+    rgba(239, 68, 68, 0.45) 0%,
+    rgba(139, 92, 246, 0.25) 80%
+  );
+  color: #ff4d4d;
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.65),
+              0 0 0 2px rgba(239, 68, 68, 0.25);
+  animation: notch-live-pulse 1.5s ease-in-out infinite;
 }
 
-.pill-btn-mic-active:hover {
-  box-shadow: 0 3px 16px rgba(255, 69, 58, 0.5), 0 0 0 3px rgba(255, 69, 58, 0.15);
+@keyframes notch-live-pulse {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.5), 0 0 0 1.5px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(239, 68, 68, 0.85), 0 0 0 3.5px rgba(239, 68, 68, 0.35);
+  }
 }
 
-/* Mic pulse ring */
-.mic-ring-wrapper {
+.notch-anim-spin {
+  animation: notch-spin 1.4s linear infinite;
+  color: #c084fc;
+}
+
+@keyframes notch-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.notch-anim-check {
+  color: #22c55e;
+  animation: notch-pop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes notch-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.notch-hint-tooltip {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.95);
+  color: #f1f5f9;
+  font-size: 8.5px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* ── Center: Amplitude Waveform Cluster & Status ───────────────────── */
+.notch-visualizer-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  max-width: 160px;
+  margin: 0 auto;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: center;
+}
+
+/* Waveform Cluster: 3 Dots + 9 Capsule Bars + 3 Dots */
+.notch-waveform-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 12px;
+}
+
+.notch-dots-box {
+  display: flex;
+  align-items: center;
+  gap: 2.2px;
+}
+
+.notch-wave-dot {
+  width: 2.4px;
+  height: 2.4px;
+  border-radius: 50%;
+  transition: transform 0.08s ease, opacity 0.12s ease;
+}
+
+.notch-bars-box {
+  display: flex;
+  align-items: center;
+  gap: 2.4px;
+}
+
+.notch-wave-bar {
+  width: 2.2px;
+  min-height: 2.5px;
+  border-radius: 999px;
+  transition: height 0.06s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: height;
+}
+
+/* Live Transcript Stream or Status */
+.notch-text-stream {
+  width: 100%;
+  max-width: 150px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 0;
+  line-height: 1.1;
+}
+
+.notch-stream-preview {
+  font-size: 9px;
+  font-weight: 500;
+  color: #f8fafc;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  letter-spacing: -0.01em;
+}
+
+.notch-msg-text {
+  font-size: 8.5px;
+  font-weight: 500;
+  color: #94a3b8;
+  letter-spacing: -0.01em;
+}
+
+.notch-msg-idle {
+  color: #64748b;
+  opacity: 0.85;
+}
+
+.notch-msg-polishing {
+  color: #c084fc;
+}
+
+.notch-msg-success {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+/* ── Right: Compact Action Buttons (40px width for symmetry) ──────── */
+/* ── Right: Compact Action Button (32px width for symmetry) ──────── */
+.notch-actions-unit {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.mic-ring {
-  position: absolute;
-  inset: -5px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  animation: micRingPulse 1.4s ease-out infinite;
-}
-
-@keyframes micRingPulse {
-  0% { transform: scale(0.85); opacity: 0.8; }
-  100% { transform: scale(1.6); opacity: 0; }
-}
-
-/* Expand button */
-.pill-btn-expand {
-  opacity: 0.6;
-}
-
-.pill-btn-expand:hover {
-  opacity: 1;
-}
-
-.pill-btn-expand-active {
-  opacity: 1;
-  background: var(--pill-btn-bg);
-}
-
-/* ── Divider ─────────────────────────────────────────────────── */
-.pill-divider {
-  width: 1px;
-  height: 18px;
-  background: var(--pill-divider);
-  margin: 0 3px;
-  opacity: 0;
-  transition: opacity 0.25s ease;
+  width: 32px;
+  height: 100%;
   flex-shrink: 0;
 }
 
-.pill-divider-show {
-  opacity: 1;
-}
-
-/* ── Expandable extras ───────────────────────────────────────── */
-.pill-extras {
-  display: flex;
+.notch-btn-icon {
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  max-width: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.2s ease,
-              margin 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-  margin-left: 0;
-}
-
-.pill-expanded .pill-extras {
-  max-width: 200px;
-  opacity: 1;
-  margin-left: 2px;
-  padding-left: 5px;
-  border-left: 1px solid var(--pill-divider);
-}
-
-/* Extra mode buttons */
-.pill-btn-extra {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  border-radius: 8px;
-  background: var(--pill-btn-ghost);
-  color: var(--pill-text-muted);
-}
-
-.pill-btn-extra:hover {
-  background: var(--pill-btn-hover);
-  color: var(--pill-text);
-  border-radius: 8px;
-}
-
-.pill-btn-extra-active {
-  background: color-mix(in srgb, var(--extra-color, #22d3ee) 15%, transparent);
-}
-
-.pill-btn-extra-active:hover {
-  background: color-mix(in srgb, var(--extra-color, #22d3ee) 25%, transparent);
-}
-
-/* ── Tooltips ────────────────────────────────────────────────── */
-.pill-tip {
-  position: absolute;
-  padding: 4px 10px;
-  background: var(--pill-tip-bg);
-  color: var(--pill-tip-text);
-  font-size: 11px;
-  font-weight: 500;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
-  letter-spacing: 0.01em;
-  border-radius: 8px;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 10001;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  animation: tipIn 0.12s ease-out;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.pill-tip-bottom {
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-@keyframes tipIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(3px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-/* ── Status message ──────────────────────────────────────────── */
-.pill-status {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 12px;
-  background: var(--pill-tip-bg);
-  color: var(--pill-tip-text);
-  font-size: 11px;
-  font-weight: 500;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
-  border-radius: 9999px;
-  white-space: nowrap;
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  z-index: 10000;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-/* ── Disabled ────────────────────────────────────────────────── */
-.pill-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-/* ── Focus visible ───────────────────────────────────────────── */
-.pill-btn:focus-visible {
-  outline: 2px solid var(--pill-accent);
-  outline-offset: 2px;
-}
-
-/* ── Ripple ──────────────────────────────────────────────────── */
-.pill-btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: currentColor;
-  opacity: 0;
-  transition: opacity 0.3s;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(15, 23, 42, 0.6) 100%
+  );
+  color: #94a3b8;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0;
 }
 
-.pill-btn:active::after {
-  opacity: 0.1;
-  transition: opacity 0s;
+.notch-btn-icon:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: scale(1.06);
 }
 
-.pill-btn-extra::after {
-  border-radius: 8px;
+.notch-btn-icon:active {
+  transform: scale(0.92);
 }
 
-/* ── Mobile responsive ───────────────────────────────────────── */
-@media (max-width: 480px) {
-  .pill-btn {
-    width: 28px;
-    height: 28px;
-    min-width: 28px;
-    min-height: 28px;
-  }
-
-  .pill-btn-mic {
-    width: 34px;
-    height: 34px;
-    min-width: 34px;
-    min-height: 34px;
-  }
-
-  .pill-btn-close {
-    width: 24px;
-    height: 24px;
-    min-width: 24px;
-    min-height: 24px;
-  }
-
-  .pill-expanded .pill-extras {
-    max-width: 160px;
-  }
+.notch-btn-close:hover {
+  background: radial-gradient(
+    circle,
+    rgba(239, 68, 68, 0.35) 0%,
+    rgba(239, 68, 68, 0.14) 100%
+  );
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.45);
 }

@@ -23,9 +23,15 @@ function hexToRgba(hex: string, alpha = 0.4): string {
   if (cleanHex.length === 3) {
     cleanHex = cleanHex.split('').map(c => c + c).join('')
   }
-  const r = parseInt(cleanHex.substring(0, 2), 16) || 34
-  const g = parseInt(cleanHex.substring(2, 4), 16) || 211
-  const b = parseInt(cleanHex.substring(4, 6), 16) || 238
+  // `parseInt(...) || fallback` would turn a valid 00 channel into the default;
+  // only NaN (unparseable) should fall back.
+  const channel = (value: string, fallback: number) => {
+    const parsed = Number.parseInt(value, 16)
+    return Number.isNaN(parsed) ? fallback : parsed
+  }
+  const r = channel(cleanHex.substring(0, 2), 34)
+  const g = channel(cleanHex.substring(2, 4), 211)
+  const b = channel(cleanHex.substring(4, 6), 238)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
