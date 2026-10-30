@@ -1,255 +1,149 @@
-<p align="center">
-  <img src="docs/screenshots/kvie_logo.jpg" alt="Kritix Voice Intelligence Engine (KVIE) Logo" width="220" style="border-radius: 50%; box-shadow: 0 0 35px rgba(215, 251, 82, 0.4);" />
-</p>
+# Kritix Voice Intelligence Engine (KVIE)
 
-<h1 align="center">🎙️ Kritix - Voice Intelligence Engine (KVIE)</h1>
+KVIE is a voice dictation and text-editing app for desktop and Android. It combines streaming speech recognition, text cleanup, voice commands, and text entry through a desktop floating mic or an Android keyboard.
 
-<p align="center">
-  <b>Local-First, Ultra-Fast AI Voice Typing & System-Wide Auto-Injection Engine for Desktop (Windows & macOS) and Android Mobile.</b><br />
-  <i>100% Wispr Flow Parity with Complete On-Device Privacy & Zero Cloud Latency.</i>
-</p>
+KVIE is under active development. Recognition accuracy, latency, and text injection behavior depend on the speech model, microphone, operating system, and target app. This README describes the current implementation; it does not claim feature parity with another product or universal compatibility with every text field.
 
 <p align="center">
-  <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri" alt="Tauri v2" /></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg?logo=rust" alt="Rust" /></a>
-  <a href="https://developer.android.com/"><img src="https://img.shields.io/badge/Android-API%2029%2B%20(ARM64)-3DDC84.svg?logo=android&logoColor=white" alt="Android" /></a>
-  <a href="https://microsoft.com"><img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows" alt="Windows" /></a>
-  <a href="https://apple.com"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-black.svg?logo=apple" alt="macOS" /></a>
-  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18-cyan.svg?logo=react" alt="React 18" /></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.0-blue.svg?logo=typescript" alt="TypeScript 5" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <img src="docs/screenshots/kvie_logo.jpg" alt="KVIE logo" width="180" />
 </p>
 
----
+## Current capabilities
 
-## 📸 Screenshots & Showcase
+### Desktop (Windows and macOS)
 
-### 🖥️ Desktop Application (Tauri v2 + Rust Core)
+- Streaming dictation through the local Python FastAPI service and Faster-Whisper.
+- Downloadable speech models managed by the app; inference uses the local model files.
+- A Tauri/Rust desktop shell, floating microphone window, and platform-specific hotkey and text-injection code.
+- Transcript cleanup with grammar rules, a custom dictionary, and voice snippets.
+- Optional text editing through a local Ollama service. If Ollama is unavailable or times out, the app falls back to its non-LLM cleanup path.
+- Voice commands and translation features in the desktop client.
+
+Text injection depends on operating-system permissions and the target app's input behavior. Test the apps you plan to use; support is not guaranteed for every application or input field.
+
+### Android
+
+- A native Kotlin keyboard and floating microphone experience.
+- Speech recognition through Android's `SpeechRecognizer`. Whether recognition stays on-device or uses a network service depends on the recognizer installed and selected on the device.
+- Text cleanup varies by Android build. The Android source includes local refinement components; the standalone keyboard module also contains an optional HTTP refinement client with a placeholder URL that must be configured before it can use a server.
+
+## Processing and privacy
+
+On desktop, microphone audio is sent to KVIE's local Python service and transcribed with a downloaded local Faster-Whisper model. Downloading or updating a model requires a network connection. Desktop LLM cleanup uses the configured Ollama endpoint, which defaults to localhost.
+
+Android speech recognition is provided by Android's selected speech-recognition service; KVIE cannot guarantee that provider processes audio offline. Check the device provider's settings and privacy policy if offline processing is required.
+
+## Screenshots
 
 <p align="center">
-  <b>Voice Workspace (Living Document Editor with Real-Time AI Polish)</b><br/><br/>
-  <img src="docs/screenshots/desktop_workspace.png" alt="Desktop Voice Workspace" width="95%" style="border-radius: 12px; border: 1px solid #282838; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+  <img src="docs/screenshots/desktop_workspace.png" alt="KVIE desktop workspace" width="90%" />
 </p>
-
-<br/>
 
 <p align="center">
-  <b>Preferences, Theme Accent Palettes & Multi-Tier Grammar Router Pipeline</b><br/><br/>
-  <img src="docs/screenshots/desktop_preferences_grammar.png" alt="Desktop Preferences & Grammar Router" width="95%" style="border-radius: 12px; border: 1px solid #282838; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+  <img src="docs/screenshots/floating_widget_expanded.png" alt="KVIE floating microphone, expanded" width="420" />
+  <br />
+  <img src="docs/screenshots/floating_widget_collapsed.png" alt="KVIE floating microphone, collapsed" width="260" />
 </p>
 
-<br/>
+## Architecture
 
-<p align="center">
-  <b>Compact Floating Mic Pill Widget (Expanded & Collapsed States)</b><br/><br/>
-  <img src="docs/screenshots/floating_widget_expanded.png" alt="Desktop Floating Mic Widget Expanded" width="560" style="margin-bottom: 12px; border-radius: 22px; border: 1.5px solid #D7FB52; box-shadow: 0 4px 20px rgba(215, 251, 82, 0.2);" /><br/>
-  <img src="docs/screenshots/floating_widget_collapsed.png" alt="Desktop Floating Mic Widget Collapsed" width="290" style="border-radius: 22px; border: 1.5px solid #D7FB52;" />
-</p>
+| Platform | Main components | Speech and text processing |
+| --- | --- | --- |
+| Desktop | React + TypeScript UI, Tauri v2 + Rust, Python FastAPI service | Faster-Whisper local transcription; TypeScript cleanup; optional local Ollama editing |
+| Android | Kotlin input method and floating-mic services | Android `SpeechRecognizer`; cleanup/refinement depends on the Android build and provider |
 
----
+Desktop flow:
 
-### 📱 Android Mobile Application & Native Keyboard
-
-<table align="center" width="100%">
-  <tr>
-    <td align="center" width="50%">
-      <b>Mobile Voice Workspace</b><br/><br/>
-      <img src="docs/screenshots/mobile_workspace.jpg" alt="Mobile Voice Workspace" width="340" style="border-radius: 14px; border: 1px solid #282838; box-shadow: 0 8px 24px rgba(0,0,0,0.4);" />
-    </td>
-    <td align="center" width="50%">
-      <b>Next-Gen Android Keyboard & Voice Sessions</b><br/><br/>
-      <img src="docs/screenshots/mobile_keyboard_sessions.jpg" alt="Next-Gen Keyboard & Voice Sessions" width="340" style="border-radius: 14px; border: 1px solid #282838; box-shadow: 0 8px 24px rgba(0,0,0,0.4);" />
-    </td>
-  </tr>
-</table>
-
----
-
-## ✨ Overview
-
-**Kritix Voice Intelligence Engine (KVIE)** is an open-source, private, local-first voice productivity suite. It transforms your raw speech into polished, context-aware prose across **any Windows, macOS, or Android application** (WhatsApp, Chrome, Gmail, Slack, VS Code, Discord, Notes, Microsoft Office, Telegram, and more).
-
-Unlike cloud-dependent solutions (such as Wispr Flow) that upload your audio stream to external servers, **KVIE executes entirely on your hardware**:
-- **Desktop (Windows & macOS)**: Tauri v2 + Rust core leveraging Win32 `WH_KEYBOARD_LL` and macOS `CGEventTap` for global hotkeys, Windows UI Automation (`IUIAutomation`) & macOS `AXUIElement` for surrounding text context, and local Whisper / Qwen2.5-1.5B models.
-- **Android Mobile**: Native Kotlin input method (`InputMethodService`), accessibility automation (`AccessibilityService`), floating mic overlay (`WindowManager`), and the speech recognition provider installed on the device. This build does not bundle Android Whisper, Parakeet, or SmolLM inference runtimes; text cleanup uses local rules, and Android never calls the desktop Python/Ollama services.
-
----
-
-## 📊 Feature Comparison Matrix
-
-| Feature / Architecture Layer | Wispr Flow | Gboard / Samsung | Kritix (KVIE) |
-| :--- | :---: | :---: | :---: |
-| **Local Speech Recognition** | ❌ (Cloud-only) | ⚠️ (Device-dependent) | ✅ **Desktop Whisper; Android device speech provider** |
-| **System-Wide Global Hotkey (`Ctrl+Alt+R` / `⌘+⌥+R`)** | ✅ | ❌ | ✅ **Windows (`WH_KEYBOARD_LL`) & macOS (`CGEventTap`)** |
-| **Cross-App Auto-Inject Everywhere** | ✅ | ❌ | ✅ **Differential `eraseAndInject` + UI Automation** |
-| **Surrounding Text Context Awareness** | ✅ | ❌ | ✅ **0ms OS Accessibility Reader** |
-| **Multi-Tier Grammar Router Pipeline** | ❌ | ❌ | ✅ **Token (0ms) + Sentence + Paragraph & Final** |
-| **LLM Post-Processing (Tone & Polish)** | ✅ | ❌ | ❌ **Android uses rule-based cleanup; no local LLM is bundled** |
-| **Per-App Automatic Tone Adaptation** | ❌ | ❌ | ✅ **Auto-detects WhatsApp ➔ Casual vs. Gmail ➔ Formal** |
-| **Spoken Voice Editing Commands** | ❌ | ❌ | ✅ **"Delete that", "Clear all", "New line", "Make formal"** |
-| **Next-Gen Android QWERTY Keyboard** | ❌ | ✅ | ✅ **Full QWERTY, Number Row (`123`), Alt-Symbols** |
-| **Case-Aware Autocorrect & Bigram Prediction** | ❌ | ✅ | ✅ **Contextual next-word & grammar fixes** |
-| **500+ Emoji Library with Real-Time Search** | ❌ | ✅ | ✅ **8 Categories + Live Keyword Search** |
-| **Multi-Item Clipboard History Drawer** | ❌ | ✅ | ✅ **Recent clips drawer with instant paste** |
-| **Voice Snippets & Text Expansion** | ✅ | ❌ | ✅ **Spoken trigger expansion** (e.g. *"my calendly"*) |
-| **Live Multi-Language Translation** | ✅ | ⚠️ (Cloud) | ✅ **100+ Languages with local target injection** |
-
----
-
-## 🚀 Flagship Features
-
-### 🖥️ Desktop (Windows & macOS)
-
-1. **⌨️ Global Hotkey & System Tray**:
-   - Dedicated hotkey (`Ctrl + Alt + R` on Windows, `Cmd + Option + R` on macOS) brings up voice capture anywhere.
-   - Runs silently in the system tray with instant minimize/restore.
-2. **👁️ Surrounding Context Reader**:
-   - Reads up to 500 characters of surrounding text before the cursor using native COM `IUIAutomation` (Windows) or `AXUIElement` (macOS).
-3. **🪄 Compact Floating Mic Pill**:
-   - Always-on-top draggable pill widget with 1-click expand/collapse, Universal Auto-Inject, Voice Command Mode, and Translate.
-4. **🧩 Multi-Tier Grammar Router Pipeline**:
-   - **Tier 1: Token Engine (0ms Pre-LLM)**: Fixes letter and word typos (`teh` ➔ `the`), casing (`i` ➔ `I`), and homophones (`their` / `they're`, `your` / `you're`).
-   - **Tier 2: Sentence Engine**: Corrects subject-verb agreement, articles (`a`/`an`), prepositions (`interested in`), and punctuation.
-   - **Tier 3: Paragraph & Final Engine**: Removes duplicate words, conversational restart fragments, and normalizes flow while preserving exact user meaning.
-   - **Interactive Pipeline Tester**: Test and benchmark sample sentences directly in the preferences panel!
-5. **🎨 Preferences & Custom Accent Color Palettes**:
-   - Curated presets: **Cyan, Green, Pink, Red, Purple, Yellow, Orange**, or any custom hex code.
-6. **⚡ Voice Snippets & Expansion**:
-   - Spoken cues expand into rich text templates (e.g., *"my signature"* expands into complete multi-line sign-offs).
-7. **📖 Custom Brand Dictionary**:
-   - Custom phonetic rules bias transcription and formatting (*"critics"* ➔ *"Kritix"*, *"tauri"* ➔ *"Tauri"*).
-
----
-
-### 📱 Android Mobile (Keyboard & Floating Mic)
-
-1. **⌨️ Full-Featured QWERTY Keyboard**:
-   - Dedicated toggleable number row (`123`) above QWERTY.
-   - Long-press alternate symbols on every key (`q`➔`1`, `w`➔`2`, `a`➔`@`, `s`➔`#`, `m`➔`?`).
-   - Shift, Caps Lock, Comma, Dot, and Action Enter key (`↵`).
-   - Clean **Material Design Vector Icons** (`ic_clipboard`, `ic_emoji`, `ic_sparkle`, `ic_backspace`, `ic_search`).
-2. **🧠 Case-Aware Autocorrect & Contextual Bigrams**:
-   - **Intelligent Casing**: Preserves user input case in mid-sentence (`the`, `that`) and only capitalizes at sentence starts (`. `, `? `, `! `, `\n`).
-   - **Grammar Corrections**: Instantly fixes `dont` ➔ `don't`, `im` ➔ `I'm`, `teh` ➔ `the`, `recieve` ➔ `receive`, `critics` ➔ `Kritix`.
-   - **Next-Word Bigrams**: Context-driven predictions (e.g., `how ` suggests `are`, `is`, `about`; `thank ` suggests `you`, `so`, `much`).
-3. **😍 500+ Emojis with Real-Time Search**:
-   - 8 rich categories: Smileys (110+), Gestures (60+), Hearts (40+), Fire/Vibes (55+), Animals (80+), Food (70+), Travel (60+), Objects (60+).
-   - Real-time search bar (`🔍 Search emoji...`) filters matching emojis dynamically as you type (`love`, `fire`, `dog`, `pizza`, `laugh`, etc.).
-4. **🗣️ Real-Time Voice Editing Commands**:
-   - Hands-free speech editing without touching the screen:
-     - *"Delete that"* / *"Scratch that"* ➔ Deletes the last spoken word/phrase.
-     - *"Delete last sentence"* ➔ Wipes back to the previous sentence boundary.
-     - *"Clear all"* ➔ Clears the active input field.
-     - *"New line"* / *"Enter"* ➔ Inserts a paragraph break.
-     - *"Make this formal"* / *"Make this casual"* ➔ Rewrites text on-the-fly.
-5. **✨ Quick AI Actions & Per-App Tone**:
-   - Sparkle icon expands into instant AI quick action chips: `[Formal]`, `[Casual]`, `[Shorten]`, `[To English]`.
-   - Automatically adapts tone: **Casual** in WhatsApp/Instagram/Telegram, **Formal** in Gmail/LinkedIn/Slack/Teams.
-6. **📋 Multi-Item Clipboard History Drawer**:
-   - Intercepts system clipboard and stores recent copy items as quick-tap chips.
-7. **🎙️ Dual Input Options**:
-   - Use the embedded keyboard mic key or launch the draggable **Floating Mic Bubble** over any app.
-
----
-
-## 🏗️ System Architecture
-
-```
-                                  ┌─────────────────────────────────────────┐
-                                  │      Target Applications (OS Level)     │
-                                  │ (Chrome, WhatsApp, Gmail, Slack, Word)  │
-                                  └────────────────────┬────────────────────┘
-                                                       │
-                   ┌───────────────────────────────────┴───────────────────────────────────┐
-                   │                                                                       │
-                   ▼ (Desktop: Windows / macOS)                                            ▼ (Android Mobile)
-    ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
-    │  Tauri v2 + Rust Core Engine  │                                       │   Native Kotlin IME Service   │
-    │  - WH_KEYBOARD_LL / CGEventTap│                                       │   - Full QWERTY + Number Row  │
-    │  - IUIAutomation / AXUIElement│                                       │   - 500+ Emojis with Search   │
-    │  - Floating Mic Pill Overlay  │                                       │   - Clipboard History Drawer  │
-    └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
-                   │                                                                       │
-                   ▼                                                                       ▼
-    ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
-    │  Whisper.cpp / Large-v3 Turbo │                                       │  Android system recognizer   │
-    │  On-Device Speech-to-Text     │                                       │  Realtime Audio Streaming     │
-    └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
-                   │                                                                       │
-                   ▼                                                                       ▼
-    ┌───────────────────────────────┐                                       ┌───────────────────────────────┐
-    │ Multi-Tier Grammar Router     │                                       │  Rule-Based Text Cleanup     │
-    │ Token -> Sentence -> Paragraph│                                       │  Voice Commands & AI Polish   │
-    └──────────────┬────────────────┘                                       └──────────────┬────────────────┘
-                   │                                                                       │
-                   └───────────────────────────────────┬───────────────────────────────────┘
-                                                       │
-                                                       ▼
-                                  ┌─────────────────────────────────────────┐
-                                  │    Differential Injected Final Text     │
-                                  │       Clean, Polished & In-Context      │
-                                  └─────────────────────────────────────────┘
+```text
+Microphone → Python streaming service → Faster-Whisper → transcript events
+           → text cleanup / optional Ollama → Tauri/Rust text injection
 ```
 
----
+## Requirements
 
-## 📦 Quick Start & Installation
+- Node.js 18+ and npm
+- Python 3.12 recommended
+- Rust stable toolchain and Cargo
+- For Android development: Android Studio, Android SDK/NDK, and a compatible JDK
 
-### Prerequisites
-* **Node.js** (v18+) & **npm**
-* **Rust** (v1.75+) with `cargo`
-* **Android SDK & NDK** (for Android build): Android Studio with SDK Platform 29+, NDK 30+
-* **JDK 21**
+## Desktop development
 
----
-
-### 🖥️ Run Desktop App (Windows / macOS)
+Clone the repository and install the JavaScript and Python dependencies:
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Aryan-sourcee/KVIE.git
+git clone https://github.com/Kritix-AI/KVIE.git
 cd KVIE
-
-# 2. Install dependencies
-npm install
-
-# 3. Launch desktop app in development mode
-npm run tauri:dev
-
-# 4. Package desktop installer
-npm run tauri:build:win   # Windows (.exe & .msi)
-npm run tauri:build:mac   # macOS (.dmg & .app)
+npm ci
+python -m venv .venv
 ```
 
----
-
-### 📱 Run Android App & Keyboard
+Activate the virtual environment, then install Python dependencies:
 
 ```bash
-# 1. Connect Android device with USB Debugging enabled
-adb devices
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
 
-# 2. Launch Android development workflow
-npm run android:dev
+# macOS / Linux
+source .venv/bin/activate
 
-# 3. Or build standalone APK using Gradle
-cd src-tauri/gen/android
-./gradlew assembleArm64Debug
+python -m pip install -r requirements.txt
 ```
 
-> [!TIP]
-> After installing on Android:
-> 1. Open **KVIE** and follow the 1-tap setup guide to enable **KVIE AI Voice Keyboard** in *Settings > System > Languages & Input*.
-> 2. Enable **KVIE Realtime Typing** in *Accessibility* for universal direct auto-injection across WhatsApp, Chrome, and all third-party apps.
+Run the desktop development app:
 
----
+```bash
+npm run tauri:dev
+```
 
-## 📄 License
+Tauri starts the local Python service as part of desktop startup. To run the service separately, use:
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
+```bash
+npm run kvie:service
+```
 
----
+Speech models are selected/downloaded through the app's model manager. Ollama is optional; install and start it locally if you want LLM-based cleanup.
 
-<p align="center">
-  Crafted with ❤️ by the <b>Kritix Open-Source Team</b>.
-</p>
+Build desktop installers with:
+
+```bash
+npm run tauri:build:win
+npm run tauri:build:mac
+```
+
+Run only the command for your target operating system.
+
+## Android development
+
+Install Android Studio and configure the Android SDK/NDK first. Then initialize and launch the Android development workflow:
+
+```bash
+npm run android:init
+npm run android:dev
+```
+
+Build an APK with:
+
+```bash
+npm run android:build
+```
+
+After installation, enable the KVIE keyboard in Android's keyboard settings and grant microphone permission when prompted. Android accessibility features, where used, require a separate explicit enablement in system settings.
+
+## Checks
+
+These are the repository's main CI checks:
+
+```bash
+npx tsc -p tsconfig.json --noEmit
+npm run build
+python -m pytest tests -q
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+## KVIE investigation agents
+
+Custom Antigravity agent definitions and shared rules live in `.agents/`. Start with `@kvie-lead`; it coordinates read-only investigators, assigns a scoped finding to `kvie-fixer`, and asks `kvie-verifier` to review the change independently. Investigators should not edit files, and hypotheses must be labeled separately from confirmed findings.
+
+## License
+
+KVIE is distributed under the MIT License. See [LICENSE](LICENSE).
