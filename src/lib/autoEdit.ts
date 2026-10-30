@@ -104,7 +104,11 @@ Surrounding Text Context: ${surroundingContext.slice(0, 300)}`
       const llmResult = (data.response || '').trim().replace(/^["']|["']$/g, '')
       if (llmResult.length > 0) {
         const postSnippet = expandVoiceSnippets(llmResult)
-        return applyCustomDictionary(postSnippet.expandedText)
+        const finalResult = applyCustomDictionary(postSnippet.expandedText)
+        if (typeof window !== 'undefined' && localStorage.getItem('kvie_trace_stages') === 'true') {
+          console.log('[STAGE 4: AUTO-EDIT (Qwen Success)]', { qwenRan: true, input: candidateText, output: finalResult })
+        }
+        return finalResult
       }
     }
   } catch {
@@ -112,5 +116,9 @@ Surrounding Text Context: ${surroundingContext.slice(0, 300)}`
   }
 
   const postSnippetFallback = expandVoiceSnippets(candidateText)
-  return applyCustomDictionary(postSnippetFallback.expandedText)
+  const fallbackResult = applyCustomDictionary(postSnippetFallback.expandedText)
+  if (typeof window !== 'undefined' && localStorage.getItem('kvie_trace_stages') === 'true') {
+    console.log('[STAGE 4: AUTO-EDIT (Fallback - Qwen Offline)]', { qwenRan: false, input: candidateText, output: fallbackResult })
+  }
+  return fallbackResult
 }

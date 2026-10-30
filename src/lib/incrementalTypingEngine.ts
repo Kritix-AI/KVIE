@@ -13,7 +13,7 @@ const graphemeSegmenter: GraphemeSegmenter | undefined =
     ? new (Intl as unknown as { Segmenter: new (locale: string, options: { granularity: string }) => GraphemeSegmenter }).Segmenter('en', { granularity: 'grapheme' })
     : undefined
 
-const toGraphemes = (text: string): string[] => {
+export const toGraphemes = (text: string): string[] => {
   if (graphemeSegmenter) {
     return Array.from(graphemeSegmenter.segment(text), segment => segment.segment)
   }
@@ -80,7 +80,11 @@ export const mergeRollingText = (existing: string, incoming: string): string => 
   if (leftLower.includes(rightLower) && left.length > right.length + 5) return left
   if (rightLower.startsWith(leftLower)) return right
 
-  const overlap = findWordOverlap(left, right)
+  let overlap = findWordOverlap(left, right)
+  const hasTerminalPunct = /[.!?]\s*$/.test(left)
+  if (hasTerminalPunct && overlap < 2) {
+    overlap = 0
+  }
   const rightWords = right.split(/\s+/).filter(Boolean)
 
   if (overlap > 0) {
@@ -127,7 +131,11 @@ export const stripCommittedOverlap = (
   }
 
   // Check word-level overlap with the tail of committed text
-  const overlap = findWordOverlap(committed, incoming)
+  let overlap = findWordOverlap(committed, incoming)
+  const hasTerminalPunct = /[.!?]\s*$/.test(committed)
+  if (hasTerminalPunct && overlap < 2) {
+    overlap = 0
+  }
   const incomingWords = incoming.split(/\s+/).filter(Boolean)
 
   let remainder = incoming

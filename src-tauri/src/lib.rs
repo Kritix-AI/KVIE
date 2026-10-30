@@ -35,7 +35,7 @@ const MAX_SURROUNDING_TEXT_LEN: usize = 500;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static LAST_INJECT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const INJECT_RATE_LIMIT_MS: u64 = 50;
+const INJECT_RATE_LIMIT_MS: u64 = 25;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static INJECT_CLOCK: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -315,8 +315,9 @@ fn erase_and_inject(erase_count: usize, text: String, verify: Option<bool>) -> R
         // Monotonic clock: a backward wall-clock step must not disable injections.
         let now_ms = inject_clock_ms();
         let last = LAST_INJECT_MS.load(Ordering::Relaxed);
-        if last != 0 && now_ms.saturating_sub(last) < INJECT_RATE_LIMIT_MS {
-            return Err("inject rate limit exceeded".to_string());
+        let elapsed = now_ms.saturating_sub(last);
+        if last != 0 && elapsed < INJECT_RATE_LIMIT_MS {
+            thread::sleep(Duration::from_millis(INJECT_RATE_LIMIT_MS - elapsed));
         }
         // Interim deltas skip verification to keep live typing fast; finals,
         // commands and one-shot injections verify by default.
@@ -342,6 +343,27 @@ fn erase_and_inject(erase_count: usize, text: String, verify: Option<bool>) -> R
         #[cfg(target_os = "windows")]
         let pre_paste_context = if do_verify { extract_focused_surrounding_text() } else { String::new() };
 
+        #[cfg(target_os = "windows")]
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            keybd_event, GetAsyncKeyState, KEYEVENTF_KEYUP, VK_MENU, VK_LMENU, VK_RMENU
+        };
+
+        #[cfg(target_os = "windows")]
+        let alt_physically_down = unsafe { GetAsyncKeyState(VK_MENU as i32) < 0 }
+            || IS_ALT_L_HELD.load(Ordering::SeqCst)
+            || IS_ALT_R_HELD.load(Ordering::SeqCst);
+
+        // Temporarily release Alt so simulated Backspaces, Unicode typing, and Ctrl+V
+        // are never combined with Alt (Alt+Backspace = Undo, Alt+Ctrl+V = ignored).
+        #[cfg(target_os = "windows")]
+        if alt_physically_down {
+            unsafe {
+                keybd_event(VK_LMENU as u8, 0x38, KEYEVENTF_KEYUP, 0);
+                keybd_event(VK_RMENU as u8, 0x38, KEYEVENTF_KEYUP, 0);
+                keybd_event(VK_MENU as u8, 0x38, KEYEVENTF_KEYUP, 0);
+            }
+        }
+
         let mut enigo = Enigo::new(&Settings::default()).map_err(|error| format!("keyboard unavailable: {error}"))?;
 
         if capped_erase > 0 {
@@ -352,23 +374,57 @@ fn erase_and_inject(erase_count: usize, text: String, verify: Option<bool>) -> R
                     thread::sleep(Duration::from_millis(2));
                 }
             }
-            thread::sleep(Duration::from_millis(15));
+            thread::sleep(Duration::from_millis(10));
         }
 
         if sanitized.is_empty() {
+            #[cfg(target_os = "windows")]
+            if alt_physically_down {
+                unsafe {
+                    if IS_ALT_L_HELD.load(Ordering::SeqCst) {
+                        keybd_event(VK_LMENU as u8, 0x38, 0, 0);
+                    } else if IS_ALT_R_HELD.load(Ordering::SeqCst) {
+                        keybd_event(VK_RMENU as u8, 0x38, 0, 0);
+                    } else {
+                        keybd_event(VK_MENU as u8, 0x38, 0, 0);
+                    }
+                }
+            }
             LAST_INJECT_MS.store(inject_clock_ms(), Ordering::Relaxed);
             return Ok(InjectionOutcome { verification: "skipped" });
         }
 
-        // Paste via clipboard, remembering the user's previous content so it can
-        // be restored once the target app has read it.
+        // Live real-time streaming injection: type directly via native Unicode SendInput without clipboard thrashing
+        if !do_verify {
+            let type_result = enigo.text(&sanitized);
+
+            #[cfg(target_os = "windows")]
+            if alt_physically_down {
+                unsafe {
+                    if IS_ALT_L_HELD.load(Ordering::SeqCst) {
+                        keybd_event(VK_LMENU as u8, 0x38, 0, 0);
+                    } else if IS_ALT_R_HELD.load(Ordering::SeqCst) {
+                        keybd_event(VK_RMENU as u8, 0x38, 0, 0);
+                    } else {
+                        keybd_event(VK_MENU as u8, 0x38, 0, 0);
+                    }
+                }
+            }
+
+            type_result.map_err(|error| format!("could not type target text: {error}"))?;
+            LAST_INJECT_MS.store(inject_clock_ms(), Ordering::Relaxed);
+            return Ok(InjectionOutcome { verification: "skipped" });
+        }
+
+        // Verified / Final injection: paste via clipboard, restoring previous user clipboard
         let previous_clipboard: Option<String> = Clipboard::new().ok().and_then(|mut clipboard| clipboard.get_text().ok());
         {
             let mut clipboard = Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
             clipboard.set_text(sanitized.clone()).map_err(|error| format!("clipboard write failed: {error}"))?;
         }
 
-        thread::sleep(Duration::from_millis(50));
+        let pre_paste_sleep = if do_verify { 25 } else { 10 };
+        thread::sleep(Duration::from_millis(pre_paste_sleep));
 
         #[cfg(target_os = "windows")]
         let use_terminal_paste = {
@@ -392,6 +448,20 @@ fn erase_and_inject(erase_count: usize, text: String, verify: Option<bool>) -> R
                 .and_then(|_| enigo.key(Key::V, Direction::Click))
                 .and_then(|_| enigo.key(Key::Control, Direction::Release))
         };
+
+        #[cfg(target_os = "windows")]
+        if alt_physically_down {
+            unsafe {
+                if IS_ALT_L_HELD.load(Ordering::SeqCst) {
+                    keybd_event(VK_LMENU as u8, 0x38, 0, 0);
+                } else if IS_ALT_R_HELD.load(Ordering::SeqCst) {
+                    keybd_event(VK_RMENU as u8, 0x38, 0, 0);
+                } else {
+                    keybd_event(VK_MENU as u8, 0x38, 0, 0);
+                }
+            }
+        }
+
         paste_result.map_err(|error| format!("could not paste into target app: {error}"))?;
 
         // Record the timestamp only after a successful injection so a failed
@@ -534,13 +604,17 @@ fn focus_window(target: isize) -> Result<(), String> {
         SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
 
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground == target {
+        return Ok(());
+    }
+
     if unsafe { IsIconic(target) } != 0 {
         unsafe { ShowWindow(target, SW_RESTORE) };
     }
 
     let target_thread = unsafe { GetWindowThreadProcessId(target, std::ptr::null_mut()) };
     let current_thread = unsafe { GetCurrentThreadId() };
-    let foreground = unsafe { GetForegroundWindow() };
     let foreground_thread = if foreground != 0 {
         let mut foreground_pid = 0u32;
         unsafe { GetWindowThreadProcessId(foreground, &mut foreground_pid) }
@@ -1122,8 +1196,14 @@ fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
                                 IS_CTRL_R_HELD.store(is_down, Ordering::SeqCst);
                             } else if kbd.vkCode == VK_LMENU as u32 {
                                 IS_ALT_L_HELD.store(is_down, Ordering::SeqCst);
+                                if !is_down && !IS_ALT_R_HELD.load(Ordering::SeqCst) {
+                                    hotkey_alt_released();
+                                }
                             } else if kbd.vkCode == VK_RMENU as u32 {
                                 IS_ALT_R_HELD.store(is_down, Ordering::SeqCst);
+                                if !is_down && !IS_ALT_L_HELD.load(Ordering::SeqCst) {
+                                    hotkey_alt_released();
+                                }
                             } else if kbd.vkCode == VK_LSHIFT as u32 {
                                 IS_SHIFT_L_HELD.store(is_down, Ordering::SeqCst);
                             } else if kbd.vkCode == VK_RSHIFT as u32 {
@@ -1159,21 +1239,37 @@ fn start_global_hotkey_listener(app_handle: tauri::AppHandle) {
     }
 }
 
-/// Voice-key (`) down: begins push-to-talk, or (within the double-tap window)
-/// switches the running session into continuous listening. Suppressed when any
-/// modifier is held, so application shortcuts and characters keep working:
-/// Ctrl+` (terminal), Shift+` (~), Alt/AltGr chords.
+/// Called when the Alt key is physically released while in a hotkey interaction.
+#[cfg(target_os = "windows")]
+fn hotkey_alt_released() {
+    use std::sync::atomic::Ordering;
+    let state = HOTKEY_STATE.load(Ordering::SeqCst);
+    if state == HOTKEY_STATE_HELD {
+        hotkey_key_release();
+    } else if state == HOTKEY_STATE_CONTINUOUS_WAIT_RELEASE {
+        HOTKEY_STATE.store(HOTKEY_STATE_CONTINUOUS, Ordering::SeqCst);
+    }
+}
+
+/// Voice-key combo (Alt + `) down: begins push-to-talk, or (within the double-tap window)
+/// switches the running session into continuous listening. Plain ` is ignored and
+/// passed through normally to apps when Alt is not held.
 #[cfg(target_os = "windows")]
 fn hotkey_key_start_or_tap() {
     use std::sync::atomic::Ordering;
 
-    let modifier_held = IS_CTRL_L_HELD.load(Ordering::SeqCst)
+    if !HOTKEY_ENABLED.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let is_alt = IS_ALT_L_HELD.load(Ordering::SeqCst) || IS_ALT_R_HELD.load(Ordering::SeqCst);
+    let other_modifier = IS_CTRL_L_HELD.load(Ordering::SeqCst)
         || IS_CTRL_R_HELD.load(Ordering::SeqCst)
-        || IS_ALT_L_HELD.load(Ordering::SeqCst)
-        || IS_ALT_R_HELD.load(Ordering::SeqCst)
         || IS_SHIFT_L_HELD.load(Ordering::SeqCst)
         || IS_SHIFT_R_HELD.load(Ordering::SeqCst);
-    if modifier_held || !HOTKEY_ENABLED.load(Ordering::SeqCst) {
+
+    // Require Alt to be held, and forbid other modifiers (Ctrl, Shift)
+    if !is_alt || other_modifier {
         return;
     }
 

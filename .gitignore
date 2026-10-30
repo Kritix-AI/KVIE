@@ -170,6 +170,8 @@ Data/VoiceCloning/samples/*.wav
 Data/VoiceCloning/samples/*.mp3
 Data/VoiceCloning/samples/*.flac
 Data/*.wav
+Data/*.sqlite3
+Data/kvie.sqlite3
 Data/*.sqlite3-shm
 Data/*.sqlite3-wal
 Data/audio_cache/

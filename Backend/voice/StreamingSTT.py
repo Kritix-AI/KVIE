@@ -8,8 +8,11 @@ the same engine can be driven by PyAudio, Tauri, or deterministic tests.
 from __future__ import annotations
 
 import collections
+import math
+import os
 import queue
 import re
+import struct
 import threading
 import time
 from dataclasses import dataclass
@@ -30,6 +33,61 @@ class TranscriptEvent:
     error: str = ""
 
 
+def _count_speech_bytes(
+    pcm_bytes: bytes,
+    sample_rate: int = 16_000,
+    threshold: float = 200.0,
+    channels: int = 1,
+    sample_width_bytes: int = 2,
+) -> int:
+    """Count bytes in 20ms frames whose RMS energy is >= threshold."""
+    if not pcm_bytes or threshold <= 0:
+        return len(pcm_bytes)
+
+    bytes_per_sample = channels * sample_width_bytes
+    frame_samples = max(1, int(sample_rate * 0.02))
+    frame_bytes = frame_samples * bytes_per_sample
+    if frame_bytes <= 0:
+        return len(pcm_bytes)
+
+    speech_bytes = 0
+    total_len = len(pcm_bytes)
+
+    try:
+        import numpy as np
+
+        for offset in range(0, total_len, frame_bytes):
+            chunk = pcm_bytes[offset : offset + frame_bytes]
+            usable_bytes = (len(chunk) // bytes_per_sample) * bytes_per_sample
+            if usable_bytes == 0:
+                break
+            dtype = np.int16 if sample_width_bytes == 2 else np.int8
+            samples = np.frombuffer(chunk[:usable_bytes], dtype=dtype).astype(np.float32)
+            if samples.size == 0:
+                break
+            rms = float(np.sqrt(np.mean(samples ** 2)))
+            if rms >= threshold:
+                speech_bytes += len(chunk)
+        return speech_bytes
+    except Exception:
+        pass
+
+    fmt_char = "h" if sample_width_bytes == 2 else "b"
+    for offset in range(0, total_len, frame_bytes):
+        chunk = pcm_bytes[offset : offset + frame_bytes]
+        num_samples = len(chunk) // bytes_per_sample
+        if num_samples == 0:
+            break
+        usable_bytes = num_samples * sample_width_bytes
+        samples = struct.unpack(f"<{num_samples}{fmt_char}", chunk[:usable_bytes])
+        sum_sq = sum(s * s for s in samples)
+        rms = math.sqrt(sum_sq / num_samples)
+        if rms >= threshold:
+            speech_bytes += len(chunk)
+
+    return speech_bytes
+
+
 Transcriber = Callable[[bytes, float, str], Union[str, Tuple[str, str], Tuple[str, float]]]
 
 
@@ -38,11 +96,12 @@ class StreamingSTTConfig:
     sample_rate: int = 16_000
     channels: int = 1
     sample_width_bytes: int = 2
-    window_ms: int = 2500       # Whisper needs 2-3s minimum for accurate transcription
-    overlap_ms: int = 800       # Large overlap for continuity between windows
-    min_chunk_ms: int = 1500    # First partial after 1.5 seconds of speech
-    draft_interval_ms: int = 1000  # Avoid re-running Whisper for every 32 ms frame
+    window_ms: int = 2000       # Responsive sliding window
+    overlap_ms: int = 600       # Overlap for continuity between windows
+    min_chunk_ms: int = 400     # First partial after 0.4 seconds of speech for instant feedback
+    draft_interval_ms: int = 250  # 250ms cadence for live real-time partial updates
     language: str = "auto"
+    speech_threshold: float = 200.0
 
     @property
     def bytes_per_second(self) -> int:
@@ -97,6 +156,7 @@ class StreamingSTT:
         self._buffer = bytearray()
         self._audio_bytes_processed = 0
         self._last_draft_processed_bytes = 0
+        self._committed_bytes = 0
         self._buffer_start_ms = 0
         self._sequence = 0
         self._rolling_text = ""
@@ -106,6 +166,15 @@ class StreamingSTT:
         self._worker: Optional[threading.Thread] = None
         self._running = False
         self._state_lock = threading.Lock()
+
+    def _count_speech_bytes(self, pcm_bytes: bytes) -> int:
+        return _count_speech_bytes(
+            pcm_bytes,
+            sample_rate=self.config.sample_rate,
+            threshold=self.config.speech_threshold,
+            channels=self.config.channels,
+            sample_width_bytes=self.config.sample_width_bytes,
+        )
 
     @staticmethod
     def _default_transcriber(audio: bytes, duration: float, language: str):
@@ -191,7 +260,17 @@ class StreamingSTT:
         while len(self._buffer) >= self.config.window_bytes:
             window = bytes(self._buffer[: self.config.window_bytes])
             self._transcribe(window, self._buffer_start_ms, final=False)
+            if not self._buffer:
+                # Buffer was cleared (e.g. pause finalization)
+                break
+            self._committed_bytes = self._audio_bytes_processed - len(self._buffer) + self.config.window_bytes
             self._discard_stride()
+
+        # Compute speech bytes in uncommitted audio for Phase 2 & 3
+        new_bytes = max(0, min(len(self._buffer), self._audio_bytes_processed - self._committed_bytes))
+        uncommitted_pcm = bytes(self._buffer[-new_bytes:]) if new_bytes > 0 else b""
+        new_speech_bytes = self._count_speech_bytes(uncommitted_pcm)
+        min_speech_bytes = int(self.config.bytes_per_second * 0.2)
 
         # Phase 2: early draft — enough audio accumulated but not a full window yet.
         # Fire a partial so the client can show the user what we have so far.
@@ -202,6 +281,7 @@ class StreamingSTT:
             not final
             and len(self._buffer) >= self.config.min_chunk_bytes
             and self._audio_bytes_processed - self._last_draft_processed_bytes >= draft_interval_bytes
+            and new_speech_bytes >= min_speech_bytes
         ):
             window = bytes(self._buffer)
             self._transcribe(window, self._buffer_start_ms, final=False, is_draft=True)
@@ -212,7 +292,7 @@ class StreamingSTT:
             if self._buffer:
                 window = bytes(self._buffer)
                 duration_ms = int(len(window) / self.config.bytes_per_second * 1000)
-                if duration_ms >= 200:
+                if duration_ms >= 200 and new_speech_bytes >= min_speech_bytes:
                     self._transcribe(window, self._buffer_start_ms, final=True)
                 self._buffer.clear()
                 self._buffer_start_ms = 0
@@ -234,6 +314,7 @@ class StreamingSTT:
             self._silence_count = 0
             self._audio_bytes_processed = 0
             self._last_draft_processed_bytes = 0
+            self._committed_bytes = 0
 
     def _discard_stride(self) -> None:
         stride = min(len(self._buffer), self.config.stride_bytes)
@@ -248,8 +329,12 @@ class StreamingSTT:
             text, language, confidence = self._normalize_result(result)
             cleaned = text.strip()
             if cleaned:
+                if os.environ.get("KVIE_TRACE_STAGES") == "1":
+                    import sys
+                    print(f"[STAGE 1: RAW STT] duration={duration:.2f}s is_draft={is_draft} lang={language or self.config.language!r} conf={confidence:.2f} text={cleaned!r}", file=sys.stderr, flush=True)
+
                 self._silence_count = 0
-                if language:
+                if language and not is_draft:
                     self._rolling_language = language
                 # Skip very low-confidence non-final emissions to reduce noise
                 if not final and confidence < 0.15:
@@ -258,6 +343,16 @@ class StreamingSTT:
                     merged_text = cleaned
                 else:
                     merged_text = self._merge_rolling_text(self._rolling_text, cleaned)
+
+                if os.environ.get("KVIE_TRACE_STAGES") == "1":
+                    import sys
+                    kind = "partial (draft)" if is_draft else ("final" if final else "partial (window)")
+                    print(f"[STAGE 2: BACKEND MERGED] kind={kind!r} emitted={merged_text!r} rolling_prior={self._rolling_text!r}", file=sys.stderr, flush=True)
+
+                if is_draft:
+                    self._emit("partial", text=merged_text)
+                    return
+
                 self._rolling_text = merged_text
                 self._rolling_confidence = max(self._rolling_confidence, confidence)
 
@@ -275,10 +370,13 @@ class StreamingSTT:
                     self._rolling_text = ""
                     self._rolling_confidence = 0.0
                     self._silence_count = 0
-            else:
+            elif not is_draft:
                 # Silence window detected — log for telemetry
                 self._silence_count += 1
                 if self._silence_count >= 2 and self._rolling_text.strip() and not final:
+                    if os.environ.get("KVIE_TRACE_STAGES") == "1":
+                        import sys
+                        print(f"[STAGE 2: BACKEND MERGED] kind='final (pause)' emitted={self._rolling_text!r}", file=sys.stderr, flush=True)
                     # User took a natural pause: finalize the previous sentence
                     self._emit(
                         "final",
@@ -292,6 +390,9 @@ class StreamingSTT:
                     self._rolling_confidence = 0.0
                     self._rolling_language = ""
                     self._silence_count = 0
+                    self._buffer.clear()
+                    self._buffer_start_ms = 0
+                    self._committed_bytes = self._audio_bytes_processed
         except Exception as exc:  # keep audio capture alive after a model error
             message = str(exc).strip() or type(exc).__name__
             self._emit("error", error=f"Transcription failed: {message[:240]}", start_ms=start_ms)
@@ -364,6 +465,9 @@ class StreamingSTT:
         left_clean = [normalize_w(w) for w in left_words if normalize_w(w)]
         right_clean = [normalize_w(w) for w in right_words if normalize_w(w)]
 
+        has_terminal_punct = bool(re.search(r"[\.!\?]\s*$", left))
+
+        # Check 1: Exact suffix-to-prefix match between left_clean[-size:] and right_clean[:size]
         overlap = 0
         max_check = min(len(left_clean), len(right_clean), 10)
         for size in range(max_check, 0, -1):
@@ -371,11 +475,8 @@ class StreamingSTT:
                 overlap = size
                 break
 
+        # Check 2: Fuzzy suffix-to-prefix match at index 0 of right_clean using similar()
         if overlap == 0:
-            # Fuzzy boundary matching: consecutive Whisper windows often
-            # transcribe the shared audio slightly differently ("text" vs
-            # "test") — exact word equality then fails and the overlap gets
-            # duplicated in the output.
             try:
                 from difflib import SequenceMatcher
 
@@ -395,11 +496,29 @@ class StreamingSTT:
             except Exception:
                 pass
 
+        # If left ends with terminal punctuation, a single-word match across the boundary
+        # is a valid sentence beginning, not a sliding-window overlap.
+        # Preserve text when ambiguous; require size >= 2 for cross-sentence overlap.
+        clause_starters = {
+            "i", "we", "you", "he", "she", "it", "they", "there", "this", "that",
+            "will", "would", "shall", "should", "can", "could", "do", "did", "does",
+            "is", "are", "was", "were", "have", "has", "had", "not", "am"
+        }
+        is_new_sentence_or_clause = bool(
+            right_words and (
+                right_words[0][0].isupper()
+                or right_words[0].endswith((",", ";", ":", "!", "?"))
+                or (len(right_words) > 1 and right_words[1].lower().rstrip(".,!?") in clause_starters)
+            )
+        )
+        if has_terminal_punct and overlap < 2 and is_new_sentence_or_clause:
+            overlap = 0
+
         if overlap > 0:
             tail = " ".join(right_words[overlap:]).strip()
             if not tail:
                 return left
             return f"{left} {tail}".strip()
 
+        # If no overlap, concatenate
         return f"{left} {right}".strip()
-

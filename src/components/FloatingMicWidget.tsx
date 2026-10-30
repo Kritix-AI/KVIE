@@ -273,7 +273,7 @@ export const FloatingMicWidget: React.FC<FloatingMicWidgetProps> = ({
             </button>
 
             {tooltipId === 'mic' && !isListening && !isProcessing && (
-              <span className="notch-hint-tooltip">` hold · 2×tap continuous</span>
+              <span className="notch-hint-tooltip">Alt+` hold · 2×tap continuous</span>
             )}
           </div>
 
@@ -352,7 +352,7 @@ export const FloatingMicWidget: React.FC<FloatingMicWidgetProps> = ({
                 </span>
               ) : (
                 <span className="notch-msg-text notch-msg-idle">
-                  {statusMessage || '` Hold or 2x tap'}
+                  {statusMessage || 'Alt+` Hold / 2x tap'}
                 </span>
               )}
             </div>

@@ -229,6 +229,8 @@ export const useLocalStreamingVoice = (enabled = true) => {
     try {
       stopRequestedRef.current = false
       lastErrorRef.current = null
+      finalTranscriptRef.current = ''
+      setState(current => ({ ...current, transcript: '', interimTranscript: '', latestSegment: '' }))
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Microphone capture is unavailable in this runtime. Check Windows microphone privacy settings and restart KVIE.')
       }
@@ -284,6 +286,9 @@ export const useLocalStreamingVoice = (enabled = true) => {
         // Partial events are debounced to reduce re-renders while keeping latency low
 
         if (parsed.kind === 'final') {
+          if (typeof window !== 'undefined' && localStorage.getItem('kvie_trace_stages') === 'true') {
+            console.log('[STAGE 3: CLIENT WS RECEIVED final]', { text: (parsed as FinalEvent).text })
+          }
           // Clear any pending partial debounce — final takes priority
           if (partialTimerRef.current) {
             window.clearTimeout(partialTimerRef.current)
@@ -349,6 +354,9 @@ export const useLocalStreamingVoice = (enabled = true) => {
           // Debounce partial: accumulate but only re-render at ~80ms intervals
           // This keeps perceived latency sub-100ms while reducing re-render overhead
           const rawText = (parsed as PartialEvent).text || ''
+          if (typeof window !== 'undefined' && localStorage.getItem('kvie_trace_stages') === 'true') {
+            console.log('[STAGE 3: CLIENT WS RECEIVED partial]', { text: rawText })
+          }
           pendingPartialRef.current = rawText
 
           if (partialTimerRef.current) {

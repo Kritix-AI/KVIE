@@ -8,7 +8,7 @@ import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
 import { runQwenAutoEdit } from './lib/autoEdit'
 import { isVoiceCommandIntent, executeVoiceCommand } from './lib/voiceCommandEngine'
-import { IncrementalTypingSession } from './lib/incrementalTypingEngine'
+import { IncrementalTypingSession, toGraphemes } from './lib/incrementalTypingEngine'
 import { applyCustomDictionary } from './lib/customDictionary'
 import { expandVoiceSnippets } from './lib/snippetsEngine'
 import { consensusTranscription } from './lib/consensusEngine'
@@ -57,6 +57,8 @@ export const FloatingWindowApp: React.FC = () => {
     return typingSessionRef.current
   }
   const lastFinalTranscriptRef = useRef('')
+  const lastProcessedFinalRef = useRef('')
+  const lastProcessedInterimRef = useRef('')
   const pushToTalkActiveRef = useRef(false)
   const pushToTalkFinalizingRef = useRef(false)
   const pushToTalkStartPromiseRef = useRef<Promise<boolean> | null>(null)
@@ -68,11 +70,18 @@ export const FloatingWindowApp: React.FC = () => {
   const toggleListeningRef = useRef<() => Promise<void>>(async () => {})
   const injectQueueRef = useRef<Promise<void>>(Promise.resolve())
 
-  const enqueueRawInject = (eraseCount: number, text: string, verify = true): Promise<void> => {
+  const enqueueRawInject = (eraseCount: number, text: string, verify = false): Promise<void> => {
+    if (typeof window !== 'undefined' && localStorage.getItem('kvie_trace_stages') === 'true') {
+      console.log('[STAGE 5: TAURI INJECTION QUEUED]', { eraseCount, appendText: text, verify })
+    }
     const run = async () => {
-      const outcome = await tauriBridge.eraseAndInject(eraseCount, text, verify)
-      if (verify && outcome.verification === 'unverified') {
-        setInjectionMessage('Applied, but KVIE could not verify the paste — check the target app.')
+      try {
+        const outcome = await tauriBridge.eraseAndInject(eraseCount, text, verify)
+        if (verify && outcome.verification === 'unverified') {
+          setInjectionMessage('Applied, but KVIE could not verify the paste — check the target app.')
+        }
+      } catch (err) {
+        console.warn('Raw inject error:', err)
       }
     }
     const queued = injectQueueRef.current.then(run, run)
@@ -129,6 +138,8 @@ export const FloatingWindowApp: React.FC = () => {
     browserSpeech.clearTranscript()
     getTypingSession().reset()
     lastFinalTranscriptRef.current = ''
+    lastProcessedFinalRef.current = ''
+    lastProcessedInterimRef.current = ''
   }
 
   /**
@@ -150,12 +161,23 @@ export const FloatingWindowApp: React.FC = () => {
     setInjectionMessage('Polishing…')
 
     try {
+      // Drain any queued live typing injections before checking final state
+      await injectQueueRef.current
+
       const ctx = await tauriBridge.getActiveAppContext().catch(() => null)
       const appName = ctx?.app_name || appSource
+      const liveTyped = getTypingSession().getFullText()
 
       // ── Step 1: Voice Command Mode / Intent ────────────────────────────────
       if (isCommandMode || isVoiceCommandIntent(raw)) {
         setInjectionMessage('Executing Voice Command…')
+        // Erase any raw command words that were typed live into the target app
+        if (liveTyped && isUniversalMode) {
+          const liveGraphemeCount = toGraphemes(liveTyped).length
+          if (liveGraphemeCount > 0) {
+            await enqueueRawInject(liveGraphemeCount, '', false)
+          }
+        }
         const cmdResult = await executeVoiceCommand(raw, ctx?.surrounding_text || '', ctx?.app_name)
         if (cmdResult.isSuccess) {
           if (isUniversalMode) {
@@ -192,11 +214,35 @@ export const FloatingWindowApp: React.FC = () => {
         return
       }
 
-      // ── Step 3: Single Atomic Injection ───────────────────────────────────
+      // ── Step 3: Single Atomic Injection / Live Reconciliation ─────────────
       let pasteSuccess = true
       if (isUniversalMode) {
         try {
-          await enqueueRawInject(0, cleaned, true)
+          const liveClean = liveTyped.trim()
+          const finalClean = cleaned.trim()
+
+          if (liveClean && liveClean === finalClean) {
+            // Text was already injected live in real time as user spoke — avoid duplicate typing!
+            pasteSuccess = true
+          } else if (liveClean) {
+            const liveGraphemes = toGraphemes(liveTyped)
+            const finalGraphemes = toGraphemes(cleaned)
+            let commonPrefixLen = 0
+            const minLen = Math.min(liveGraphemes.length, finalGraphemes.length)
+            while (commonPrefixLen < minLen && liveGraphemes[commonPrefixLen] === finalGraphemes[commonPrefixLen]) {
+              commonPrefixLen += 1
+            }
+            const eraseCount = liveGraphemes.length - commonPrefixLen
+            const suffix = finalGraphemes.slice(commonPrefixLen).join('')
+            if (eraseCount > 0 || suffix) {
+              const isMinorDelta = commonPrefixLen > 0 && eraseCount <= 10
+              await enqueueRawInject(eraseCount, suffix, !isMinorDelta)
+            }
+            pasteSuccess = true
+          } else {
+            // No live text typed (e.g. initial injection)
+            await enqueueRawInject(0, cleaned, true)
+          }
         } catch (pasteErr) {
           pasteSuccess = false
           const reason = pasteErr instanceof Error ? pasteErr.message : String(pasteErr)
@@ -243,6 +289,13 @@ export const FloatingWindowApp: React.FC = () => {
     }
     pushToTalkActiveRef.current = false
     setIsContinuousMode(false)
+    const liveTyped = getTypingSession().getFullText()
+    if (liveTyped && isUniversalMode) {
+      const liveGraphemes = toGraphemes(liveTyped).length
+      if (liveGraphemes > 0) {
+        void enqueueRawInject(liveGraphemes, '', false)
+      }
+    }
     clearAll(true)
     setInjectionMessage(null)
     setIsProcessing(false)
@@ -363,7 +416,7 @@ export const FloatingWindowApp: React.FC = () => {
       void pushToTalkHandlersRef.current.stop()
     }).then(unlisten => { unlistenStop = unlisten })
     void listen<string>('push_to_talk_mode', (event) => {
-      // Double-tap ` switches the running session to continuous listening —
+      // Double-tap Alt+` switches the running session to continuous listening —
       // the microphone stays on hands-free.
       if (event.payload === 'continuous') {
         setIsContinuousMode(true)
@@ -376,6 +429,48 @@ export const FloatingWindowApp: React.FC = () => {
       unlistenMode?.()
     }
   }, [])
+
+  // ── Real-Time Incremental Typing Coordinator ─────────────────────────────
+  // Bridges incoming streaming speech segments (partials and finals) to the
+  // IncrementalTypingSession and dispatches low-latency keystroke/paste deltas
+  // to the active external app via tauriBridge.eraseAndInject.
+  useEffect(() => {
+    if (!speech.isListening || !isUniversalMode || isConsensusMode || isCommandMode) {
+      return
+    }
+
+    const currentFinal = (speech.transcript || '').trim()
+    const currentInterim = (speech.interimTranscript || '').trim()
+
+    // 1. Process finalized sentence segment first (commits and anchors)
+    if (currentFinal && currentFinal !== lastProcessedFinalRef.current) {
+      lastProcessedFinalRef.current = currentFinal
+      lastProcessedInterimRef.current = '' // Reset interim tracking for clean continuation
+
+      const delta = getTypingSession().processSegment(currentFinal, true)
+      if (delta.eraseCount > 0 || delta.appendText) {
+        void enqueueRawInject(delta.eraseCount, delta.appendText, false)
+      }
+      return
+    }
+
+    // 2. Process streaming interim partials (dynamic real-time writing)
+    if (currentInterim && currentInterim !== lastProcessedInterimRef.current) {
+      lastProcessedInterimRef.current = currentInterim
+
+      const delta = getTypingSession().processSegment(currentInterim, false)
+      if (delta.eraseCount > 0 || delta.appendText) {
+        void enqueueRawInject(delta.eraseCount, delta.appendText, false)
+      }
+    }
+  }, [
+    speech.isListening,
+    speech.transcript,
+    speech.interimTranscript,
+    isUniversalMode,
+    isConsensusMode,
+    isCommandMode,
+  ])
 
   // ── Consensus Mode Multi-Take Collection ───────────────────────────────────
   useEffect(() => {
