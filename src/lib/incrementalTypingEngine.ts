@@ -21,6 +21,48 @@ export const toGraphemes = (text: string): string[] => {
 }
 
 /**
+ * Select the portion of a stopped recording that is still safe to polish.
+ * Previously committed text is immutable. If the stop result is cumulative,
+ * remove its committed prefix; if it conflicts with that prefix, trust only the
+ * live interim already tracked by the typing session.
+ */
+export const getFinalActiveText = (rawText: string, committedText: string, interimText: string): string => {
+  const raw = rawText.trim()
+  const committed = committedText.trim()
+  if (!committed) return raw
+
+  const normalize = (value: string) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ')
+  if (interimText && normalize(raw) === normalize(interimText)) return raw
+
+  // Compare same-length slices before removing the prefix so locale-specific
+  // case mappings cannot shift the UTF-16 offset used by slice().
+  if (raw.slice(0, committed.length).toLocaleLowerCase() === committed.toLocaleLowerCase()) {
+    return raw.slice(committed.length).trimStart()
+  }
+
+  // A conflicting cumulative final could contain a rewritten committed prefix.
+  // Do not feed that text back through cleanup and risk typing it a second time.
+  return interimText.trim()
+}
+
+/** Build a final typing delta against the active interim only. */
+export const reconcileFinalInterim = (interimText: string, cleanedTail: string): TypingDelta => {
+  const previous = toGraphemes(interimText)
+  const target = toGraphemes(cleanedTail)
+  let commonPrefixLen = 0
+  const minLen = Math.min(previous.length, target.length)
+  while (commonPrefixLen < minLen && previous[commonPrefixLen] === target[commonPrefixLen]) {
+    commonPrefixLen += 1
+  }
+  return {
+    eraseCount: previous.length - commonPrefixLen,
+    appendText: target.slice(commonPrefixLen).join(''),
+    committedText: '',
+    uncommittedInterim: cleanedTail,
+  }
+}
+
+/**
  * KVIE Smart Incremental Typing & Overlap Analysis Engine
  * 
  * Solves the sentence rewriting problem on pauses:

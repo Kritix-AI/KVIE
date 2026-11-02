@@ -8,7 +8,7 @@ import { tauriBridge } from './lib/tauriBridge'
 import { saveVoiceSession } from './lib/sessionRecorder'
 import { runQwenAutoEdit } from './lib/autoEdit'
 import { isVoiceCommandIntent, executeVoiceCommand } from './lib/voiceCommandEngine'
-import { IncrementalTypingSession, toGraphemes } from './lib/incrementalTypingEngine'
+import { getFinalActiveText, IncrementalTypingSession, reconcileFinalInterim, toGraphemes } from './lib/incrementalTypingEngine'
 import { applyCustomDictionary } from './lib/customDictionary'
 import { expandVoiceSnippets } from './lib/snippetsEngine'
 import { consensusTranscription } from './lib/consensusEngine'
@@ -166,7 +166,10 @@ export const FloatingWindowApp: React.FC = () => {
 
       const ctx = await tauriBridge.getActiveAppContext().catch(() => null)
       const appName = ctx?.app_name || appSource
-      const liveTyped = getTypingSession().getFullText()
+      const typingSession = getTypingSession()
+      const committedText = typingSession.getCommittedText()
+      const interimText = typingSession.getUncommittedInterim()
+      const liveTyped = typingSession.getFullText()
 
       // ── Step 1: Voice Command Mode / Intent ────────────────────────────────
       if (isCommandMode || isVoiceCommandIntent(raw)) {
@@ -199,49 +202,48 @@ export const FloatingWindowApp: React.FC = () => {
       }
 
       // ── Step 2: Natural Language Polish & Translation ────────────────────
-      const stripped = stripVerbalBacktracks(raw)
-      let cleaned = await runQwenAutoEdit(stripped, {
-        surroundingText: ctx?.surrounding_text,
-        targetApp: ctx?.app_name,
-      })
+      // Polish only the active tail. The committed prefix has already been
+      // typed and must never be sent through final reconciliation again.
+      const activeRaw = getFinalActiveText(raw, committedText, interimText)
+      const stripped = stripVerbalBacktracks(activeRaw)
+      let cleaned = stripped
+        ? await runQwenAutoEdit(stripped, {
+            surroundingText: ctx?.surrounding_text,
+            targetApp: ctx?.app_name,
+          })
+        : ''
 
-      if (!cleaned || !cleaned.trim()) {
+      if (activeRaw && (!cleaned || !cleaned.trim())) {
         cleaned = applyCustomDictionary(expandVoiceSnippets(stripped).expandedText)
       }
 
       if (!cleaned.trim()) {
+        if (liveTyped) void saveVoiceSession(liveTyped, appName)
         setIsProcessing(false)
         return
       }
+
+      const cleanedTail = cleaned.trim()
+      const needsLeadingSpace =
+        committedText.length > 0 &&
+        !/[\s\n]$/.test(committedText) &&
+        !/^[.,!?;:]/.test(cleanedTail)
+      const finalTail = needsLeadingSpace ? ` ${cleanedTail}` : cleanedTail
+      const finalSessionText = `${committedText}${finalTail}`.trim()
 
       // ── Step 3: Single Atomic Injection / Live Reconciliation ─────────────
       let pasteSuccess = true
       if (isUniversalMode) {
         try {
-          const liveClean = liveTyped.trim()
-          const finalClean = cleaned.trim()
-
-          if (liveClean && liveClean === finalClean) {
-            // Text was already injected live in real time as user spoke — avoid duplicate typing!
-            pasteSuccess = true
-          } else if (liveClean) {
-            const liveGraphemes = toGraphemes(liveTyped)
-            const finalGraphemes = toGraphemes(cleaned)
-            let commonPrefixLen = 0
-            const minLen = Math.min(liveGraphemes.length, finalGraphemes.length)
-            while (commonPrefixLen < minLen && liveGraphemes[commonPrefixLen] === finalGraphemes[commonPrefixLen]) {
-              commonPrefixLen += 1
-            }
-            const eraseCount = liveGraphemes.length - commonPrefixLen
-            const suffix = finalGraphemes.slice(commonPrefixLen).join('')
-            if (eraseCount > 0 || suffix) {
-              const isMinorDelta = commonPrefixLen > 0 && eraseCount <= 10
-              await enqueueRawInject(eraseCount, suffix, !isMinorDelta)
+          if (interimText) {
+            const delta = reconcileFinalInterim(interimText, finalTail)
+            if (delta.eraseCount > 0 || delta.appendText) {
+              await enqueueRawInject(delta.eraseCount, delta.appendText, false)
             }
             pasteSuccess = true
           } else {
             // No live text typed (e.g. initial injection)
-            await enqueueRawInject(0, cleaned, true)
+            await enqueueRawInject(0, finalTail, true)
           }
         } catch (pasteErr) {
           pasteSuccess = false
@@ -258,7 +260,7 @@ export const FloatingWindowApp: React.FC = () => {
       }
 
       // ── Step 4: Save to Voice Session History ─────────────────────────────
-      void saveVoiceSession(cleaned, appName)
+      void saveVoiceSession(finalSessionText, appName)
 
       // ── Step 5: Visual Feedback ───────────────────────────────────────────
       setIsProcessing(false)
