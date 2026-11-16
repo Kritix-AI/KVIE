@@ -180,7 +180,7 @@ def test_flush_does_not_retranscribe_committed_overlap():
     engine.start()
 
     # Feed exactly one full window (1000ms) and immediately flush
-    pcm = b"\x00" * int(config.bytes_per_second * 1.0)
+    pcm = _synthetic_speech(1.0, config.sample_rate)
     engine.push_pcm(pcm)
     time.sleep(0.05)
     engine.flush()
@@ -227,7 +227,7 @@ def test_pause_clears_buffer_overlap():
         call_idx += 1
         return resp
 
-    config = StreamingSTTConfig(window_ms=1000, overlap_ms=250)
+    config = StreamingSTTConfig(window_ms=1000, overlap_ms=250, speech_threshold=0.0)
     engine = StreamingSTT(config=config, transcriber=mock_transcriber)
     engine.start()
 
@@ -448,3 +448,91 @@ def test_default_transcriber_path_uses_stt_function(monkeypatch):
     assert calls == [(config.window_bytes, 1.0, config.language, False)]
     assert len(finals) == 1
     assert finals[0].text == "default path verified"
+
+
+def test_phase1_vad_silence_bypasses_transcriber():
+    calls = []
+
+    def mock_transcriber(audio, duration, language):
+        calls.append((len(audio), duration))
+        return "hallucinated prompt", 0.95
+
+    config = StreamingSTTConfig(window_ms=1000, overlap_ms=250, speech_threshold=200.0)
+    engine = StreamingSTT(config=config, transcriber=mock_transcriber)
+    engine.start()
+
+    # Push 3.0 seconds of pure silence
+    silence = b"\x00" * int(config.bytes_per_second * 3.0)
+    engine.push_pcm(silence)
+    time.sleep(0.05)
+    engine.flush()
+    engine.stop(flush=False)
+
+    # Transcriber must never be called on pure silence
+    assert len(calls) == 0, f"Expected 0 transcriber calls on silence, got {len(calls)}"
+    events = [e for e in engine.events() if e.kind in {"partial", "final"}]
+    assert len(events) == 0, f"Expected 0 transcript events on silence, got {events}"
+
+
+def test_phase1_vad_silence_triggers_pause_finalization_without_whisper():
+    calls = []
+
+    def mock_transcriber(audio, duration, language):
+        calls.append((len(audio), duration))
+        return "Hello world.", 0.9
+
+    config = StreamingSTTConfig(window_ms=1000, overlap_ms=250, speech_threshold=200.0)
+    engine = StreamingSTT(config=config, transcriber=mock_transcriber)
+    engine.start()
+
+    # Window 1: speech
+    engine.push_pcm(_synthetic_speech(1.0, config.sample_rate))
+    time.sleep(0.05)
+
+    # Subsequent silence: 2.5 seconds of pure silence
+    engine.push_pcm(b"\x00" * int(config.bytes_per_second * 2.5))
+    time.sleep(0.05)
+
+    events = list(engine.events())
+    finals = [e for e in events if e.kind == "final"]
+    assert len(finals) == 1
+    assert finals[0].text == "Hello world."
+    # Transcriber was called ONLY for the speech window and initial overlap, NOT for the silence windows
+    assert len(calls) == 2, f"Expected 2 transcriber calls, got {len(calls)}"
+    assert len(engine._buffer) == 0, "Expected buffer cleared after pause finalization"
+    engine.stop(flush=False)
+
+
+def test_subtitle_hallucination_blacklist_rejection():
+    from Backend.voice.STT import correct_text, HALLUCINATION_BLACKLIST_REGEX, _HOTWORD_PROMPT
+
+    # Subtitle hallucination phrases must be rejected (return empty string)
+    assert correct_text("Thank you for watching") == ""
+    assert correct_text("Thank you for watching.") == ""
+    assert correct_text("Thanks for watching!") == ""
+    assert correct_text("Please subscribe") == ""
+    assert correct_text("Please subscribe.") == ""
+    assert correct_text("Subtitles by") == ""
+    assert correct_text("Subtitles by Amara.org") == ""
+    assert correct_text("translated by") == ""
+    assert correct_text("Like and subscribe") == ""
+    assert correct_text("watching!") == ""
+    assert correct_text("See you next time") == ""
+    assert correct_text("Transcript by") == ""
+    assert correct_text("captioning by") == ""
+
+    # Legitimate speech mentioning keywords must NOT be rejected
+    assert correct_text("Thank you for watching this presentation.") == "Thank you for watching this presentation."
+    assert correct_text("I need you to review the pull request.") == "I need you to review the pull request."
+    assert correct_text("Please subscribe to the newsletter if interested.") == "Please subscribe to the newsletter if interested."
+    assert correct_text("You") == "You"
+    assert correct_text("Bye") == "Bye"
+    assert correct_text("you") == "you"
+    assert correct_text("bye") == "bye"
+
+    # Hotword prompt must not contain conversational sentences
+    assert "Aaj ka kya plan hai" not in _HOTWORD_PROMPT
+    assert "Main bilkul thik hu" not in _HOTWORD_PROMPT
+    assert "KVIE" in _HOTWORD_PROMPT
+    assert "GitHub" in _HOTWORD_PROMPT
+

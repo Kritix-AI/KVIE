@@ -13,13 +13,17 @@ Public API:
     detect_language(text) -> str                   # "en" | "hi" | "hinglish"
     is_loaded() -> bool
     get_model() -> WhisperModel | None
+    warmup(model_name) -> bool
+    get_device_telemetry() -> Dict[str, Any]
+    get_active_device() -> str | None
+    get_active_compute_type() -> str | None
 """
 
 import os
 import re
 import sys
 import threading
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, Union
 from dataclasses import dataclass
 
 if sys.platform == "win32":
@@ -40,13 +44,16 @@ os.makedirs(_DATA_DIR, exist_ok=True)
 
 
 def _register_nvidia_dlls() -> None:
-    """Make cuBLAS/cuDNN from the ``nvidia-cublas-cu12`` / ``nvidia-cudnn-cu12``
-    pip wheels loadable for CTranslate2 GPU inference. Without this, CUDA model
-    load succeeds but the first inference dies with
-    "Library cublas64_12.dll is not found" and KVIE silently falls back to CPU.
+    """Make cuBLAS/cuDNN from nvidia pip wheels loadable for CTranslate2 GPU inference.
+
+    Supports:
+      - Windows (.dll via os.add_dll_directory and PATH)
+      - Linux (.so via LD_LIBRARY_PATH and ctypes.CDLL preloading with RTLD_GLOBAL)
+        for Docker and GConnect containers.
     """
     try:
         import site
+        import ctypes
         seen = set()
         search_paths = []
         try:
@@ -57,13 +64,20 @@ def _register_nvidia_dlls() -> None:
             search_paths.append(site.getusersitepackages())
         except Exception:
             pass
+
+        is_windows = sys.platform == "win32"
+        rtld_mode = getattr(ctypes, "RTLD_GLOBAL", 0)
+
         for sp in search_paths:
             nvidia_dir = os.path.join(sp, "nvidia")
             if not os.path.isdir(nvidia_dir) or nvidia_dir in seen:
                 continue
             seen.add(nvidia_dir)
             for root, _dirs, files in os.walk(nvidia_dir):
-                if any(f.lower().endswith(".dll") for f in files):
+                dll_files = [f for f in files if f.lower().endswith(".dll")]
+                so_files = [f for f in files if f.lower().endswith(".so") or ".so." in f.lower()]
+
+                if is_windows and dll_files:
                     try:
                         os.add_dll_directory(root)
                     except OSError:
@@ -71,6 +85,16 @@ def _register_nvidia_dlls() -> None:
                     # CTranslate2 loads CUDA libraries with plain LoadLibrary
                     # semantics, which search PATH but not add_dll_directory.
                     os.environ["PATH"] = root + os.pathsep + os.environ.get("PATH", "")
+                elif not is_windows and so_files:
+                    ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+                    if root not in ld_path.split(os.pathsep):
+                        os.environ["LD_LIBRARY_PATH"] = (root + os.pathsep + ld_path) if ld_path else root
+                    for f in sorted(so_files):
+                        so_path = os.path.join(root, f)
+                        try:
+                            ctypes.CDLL(so_path, mode=rtld_mode)
+                        except Exception:
+                            pass
     except Exception:
         pass
 
@@ -92,7 +116,7 @@ def _cuda_available() -> bool:
 
 @dataclass
 class STTConfig:
-    model_name: str = "kritix-stt"
+    model_name: str = "Systran/faster-whisper-large-v3-turbo"
     sample_rate: int = 16000
     device: str = "cuda"
     skip_vad: bool = True  # faster-whisper has built-in VAD, skip Silero double-filter
@@ -105,10 +129,8 @@ class STTConfig:
             env.get("ASRModel")
             or env.get("WhisperModel")
             or env.get("WhisperModelSize")
-            or "kritix-stt"
+            or "Systran/faster-whisper-large-v3-turbo"
         )
-        if configured_model != "kritix-stt":
-            configured_model = "kritix-stt"
         # An explicit ASRDevice wins; otherwise auto-detect so the GPU is used
         # when present and CPU works out of the box when it is not.
         device = env.get("ASRDevice") or env.get("WhisperDevice") or ("cuda" if _cuda_available() else "cpu")
@@ -124,12 +146,18 @@ class STTConfig:
 _asr_model = None
 _asr_engine_type = None  # "faster_whisper" or "openai_whisper"
 _loaded_device: Optional[str] = None  # device the active model actually runs on
+_loaded_compute_type: Optional[str] = None  # compute type of the active model
 _stt_lock  = threading.Lock()
 
 
 def get_active_device() -> Optional[str]:
     """Device of the currently loaded model ('cuda'/'cpu'), or None if unloaded."""
     return _loaded_device if _asr_model is not None else None
+
+
+def get_active_compute_type() -> Optional[str]:
+    """Compute type of the currently loaded model, or None if unloaded."""
+    return _loaded_compute_type if _asr_model is not None else None
 
 
 def get_model(config: Optional[STTConfig] = None):
@@ -145,9 +173,13 @@ def get_model(config: Optional[STTConfig] = None):
         return _load_model_locked(config)
 
 
-def _load_model_locked(config: Optional[STTConfig]):
-    global _asr_model, _asr_engine_type, _loaded_device
-    cfg = config or STTConfig.from_env()
+def _load_model_locked(config: Optional[Union[STTConfig, str]] = None):
+    global _asr_model, _asr_engine_type, _loaded_device, _loaded_compute_type
+    if isinstance(config, str):
+        cfg = STTConfig.from_env()
+        cfg.model_name = config
+    else:
+        cfg = config or STTConfig.from_env()
     used_device = cfg.device
     print(f"[STT] Loading Whisper model: {cfg.model_name} on {cfg.device}", flush=True)
 
@@ -161,6 +193,12 @@ def _load_model_locked(config: Optional[STTConfig]):
         from Backend.voice.ModelManager import get_model_snapshot_path
         raw_name = cfg.model_name
         target_model = get_model_snapshot_path(raw_name)
+        if target_model is None and raw_name in {"Systran/faster-whisper-large-v3-turbo", "large-v3-turbo"}:
+            # Graceful local fallback to kritix-stt snapshot if turbo is not yet installed
+            fallback_snapshot = get_model_snapshot_path("kritix-stt")
+            if fallback_snapshot is not None:
+                print(f"[STT] Model snapshot for '{raw_name}' not found locally; falling back to installed 'kritix-stt'", flush=True)
+                target_model = fallback_snapshot
         if target_model is None:
             raise FileNotFoundError(
                 f"The selected speech model '{raw_name}' has no complete local model.bin snapshot. "
@@ -222,10 +260,12 @@ def _load_model_locked(config: Optional[STTConfig]):
 
         _asr_engine_type = "faster_whisper"
         _loaded_device = used_device
+        _loaded_compute_type = compute_type
         print(f"[STT] Loaded faster-whisper CTranslate2 model ({target_model}, device={_loaded_device}, compute_type={compute_type})", flush=True)
         return _asr_model
     except Exception as e:
         print(f"[STT] faster-whisper load notice: {e}", flush=True)
+        _loaded_compute_type = None
 
     # Do not let a missing CTranslate2 model trigger an untracked PyTorch model
     # download. ModelManager is the sole download path and reports progress.
@@ -235,6 +275,143 @@ def _load_model_locked(config: Optional[STTConfig]):
 def is_loaded() -> bool:
     """Return current load state without triggering model loading or network IO."""
     return _asr_model is not None
+
+
+def warmup(model_name: Optional[str] = None) -> bool:
+    """Execute a 0.5s silent audio inference to pre-initialize model kernels and memory.
+
+    Returns True if warmup inference succeeded, False if model is unavailable
+    or inference could not be completed. Non-blocking and exception-safe.
+    """
+    try:
+        with _stt_lock:
+            global _asr_model
+            model = _asr_model
+            if model is None:
+                cfg = None
+                if model_name:
+                    cfg = STTConfig.from_env()
+                    cfg.model_name = model_name
+                model = _load_model_locked(cfg)
+
+            if model is None:
+                target = model_name or "default"
+                print(f"[STT] Warmup notice: model '{target}' not loaded (snapshot missing)", flush=True)
+                return False
+
+            import numpy as np
+            # 0.5s of silent audio at 16000Hz = 8000 samples
+            silent_audio = np.zeros(8000, dtype=np.float32)
+
+            if hasattr(model, "transcribe"):
+                result = model.transcribe(
+                    silent_audio,
+                    language="en",
+                    beam_size=1,
+                    vad_filter=False,
+                )
+                if isinstance(result, tuple):
+                    segments, _ = result
+                    # Drain generator to ensure execution through CTranslate2/PyTorch kernels
+                    next(iter(segments), None)
+
+            print(
+                f"[STT] Warmup completed successfully (model={model_name or getattr(_asr_model, 'model_name', 'default')}, "
+                f"device={_loaded_device}, compute={_loaded_compute_type})",
+                flush=True,
+            )
+            return True
+    except Exception as exc:
+        print(f"[STT] Warmup warning (non-fatal): {exc}", flush=True)
+        return False
+
+
+def get_device_telemetry() -> Dict[str, Any]:
+    """Return structured device, compute type, and VRAM telemetry via PyTorch/NVML.
+
+    Returns a structured dictionary:
+        gpu_name: string or None
+        compute_type: string or None (e.g., "float16", "int8_float16", "int8")
+        vram_allocated_mb: int or None
+        vram_reserved_mb: int or None
+        vram_total_mb: int or None
+        vram_free_mb: int or None
+        device: string ("cuda" or "cpu")
+        gpu_available: bool
+    """
+    active_device = get_active_device()
+    active_compute = get_active_compute_type()
+    gpu_avail = _cuda_available()
+
+    if active_device is not None:
+        device = active_device
+        compute_type = active_compute or ("float16" if device == "cuda" else "int8")
+    else:
+        try:
+            cfg = STTConfig.from_env()
+            device = cfg.device
+            from dotenv import dotenv_values
+            env = dotenv_values(os.path.join(_ROOT, ".env"))
+            compute_type = env.get("WhisperComputeType") or ("float16" if device == "cuda" else "int8")
+        except Exception:
+            device = "cuda" if gpu_avail else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+
+    telemetry: Dict[str, Any] = {
+        "gpu_name": None,
+        "compute_type": compute_type,
+        "vram_allocated_mb": None,
+        "vram_reserved_mb": None,
+        "vram_total_mb": None,
+        "vram_free_mb": None,
+        "device": device,
+        "gpu_available": gpu_avail,
+    }
+
+    # 1. Query PyTorch CUDA telemetry
+    try:
+        import torch
+        if torch.cuda.is_available():
+            telemetry["gpu_available"] = True
+            telemetry["gpu_name"] = str(torch.cuda.get_device_name(0))
+            telemetry["vram_allocated_mb"] = int(torch.cuda.memory_allocated(0) // (1024 * 1024))
+            telemetry["vram_reserved_mb"] = int(torch.cuda.memory_reserved(0) // (1024 * 1024))
+            try:
+                free_bytes, total_bytes = torch.cuda.mem_get_info(0)
+                telemetry["vram_free_mb"] = int(free_bytes // (1024 * 1024))
+                telemetry["vram_total_mb"] = int(total_bytes // (1024 * 1024))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2. Query NVML fallback if PyTorch did not yield GPU name or total VRAM
+    if telemetry["gpu_name"] is None or telemetry["vram_total_mb"] is None:
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            telemetry["gpu_available"] = True
+            if telemetry["gpu_name"] is None:
+                name = pynvml.nvmlDeviceGetName(handle)
+                telemetry["gpu_name"] = name.decode("utf-8") if isinstance(name, bytes) else str(name)
+            if telemetry["vram_total_mb"] is None:
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                telemetry["vram_total_mb"] = int(mem_info.total // (1024 * 1024))
+                telemetry["vram_free_mb"] = int(mem_info.free // (1024 * 1024))
+                if telemetry["vram_allocated_mb"] is None:
+                    telemetry["vram_allocated_mb"] = int(mem_info.used // (1024 * 1024))
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+
+    # If no GPU is available and model is not loaded, normalize device to "cpu"
+    if not telemetry["gpu_available"] and active_device is None:
+        telemetry["device"] = "cpu"
+        if telemetry["compute_type"] == "float16":
+            telemetry["compute_type"] = "int8"
+
+    return telemetry
 
 
 # ── Silero VAD Pre-filter ─────────────────────────────────────────────────────
@@ -282,12 +459,7 @@ def _vad_filter(audio_float32, sr: int = 16000):
 # ── Hot-Word Boosting ─────────────────────────────────────────────────────────
 
 # Domain vocabulary that Whisper frequently misrecognizes
-_HOTWORD_PROMPT = (
-    "Transcribe Hindi and English spoken together in Hinglish using Roman script. Do NOT translate into English. "
-    "Examples of Hinglish sentences: Aaj ka kya plan hai, Main bilkul thik hu, Khaana kha liya kya, "
-    "Kaam ho gaya bhai, Kitne baje milna hai, Kya kar rahe ho, Please send me the file, "
-    "Kritix, YouTube, WhatsApp, Spotify, Chrome, Google, Instagram, Facebook."
-)
+_HOTWORD_PROMPT = "KVIE, Kritix, Python, TypeScript, React, Vite, FastAPI, WebSocket, API, GitHub"
 
 
 # ── Language Detection ────────────────────────────────────────────────────────
@@ -335,6 +507,12 @@ def _save_language(lang: str):
 
 # ── Text Post-Processing ──────────────────────────────────────────────────────
 
+HALLUCINATION_BLACKLIST_REGEX = re.compile(
+    r"(?i)^(\s*(thank you for watching|thanks for watching|please subscribe|"
+    r"subtitles by|translated by|like and subscribe|watching!|see you next time|"
+    r"hello\?|amara\.org|transcript by|captioning by)\s*[.?!]*\s*)+$"
+)
+
 SAFE_CORRECTIONS = {
     "your duped": "youtube", "you duped": "youtube",
     "your tube": "youtube",  "you tube": "youtube", "dupe": "youtube",
@@ -350,7 +528,11 @@ SAFE_CORRECTIONS = {
 def correct_text(text: str) -> str:
     # Apply brand/typo corrections WITHOUT flattening case — the old
     # text.lower() destroyed capitalization for every HTTP-transcribed final.
+    if not text:
+        return ""
     t = re.sub(r"\s+", " ", text).strip()
+    if HALLUCINATION_BLACKLIST_REGEX.match(t):
+        return ""
     for wrong, right in SAFE_CORRECTIONS.items():
         t = re.sub(rf"\b{re.escape(wrong)}\b", right, t, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", t).strip()
@@ -473,18 +655,26 @@ def _transcribe_faster_whisper(model, arr, lang_arg, beam_size: int = 1):
         language=lang_arg,
         task="transcribe",
         beam_size=beam_size,
+        temperature=0.0,
+        repetition_penalty=1.15,
+        compression_ratio_threshold=2.4,
         vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=300, speech_pad_ms=100),
+        vad_parameters=dict(min_silence_duration_ms=500, speech_pad_ms=200),
         no_speech_threshold=0.6,
         log_prob_threshold=-1.0,
         condition_on_previous_text=False,
-        without_timestamps=True,
+        without_timestamps=False,
+        hallucination_silence_threshold=1.5,
         initial_prompt=_HOTWORD_PROMPT,
     )
 
     all_segments = list(segments)
     text = " ".join(s.text.strip() for s in all_segments if s.text and s.text.strip())
     text = re.sub(r"\s+", " ", text).strip()
+
+    # Discard hallucinated subtitle artifacts immediately at transcription level
+    if HALLUCINATION_BLACKLIST_REGEX.match(text):
+        return "", 0.0
 
     # Calculate confidence from average log probability
     # NOTE: faster-whisper's Segment attribute is `avg_logprob` (no underscore) —

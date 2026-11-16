@@ -25,6 +25,17 @@ export interface ServiceHealthResponse {
   ok: boolean
   model_ready: boolean
   active_model?: string
+  device?: string
+  gpu_available?: boolean
+  gpu_name?: string | null
+  compute_type?: string | null
+  vram_allocated_mb?: number | null
+  vram_reserved_mb?: number | null
+  vram_total_mb?: number | null
+  vram_free_mb?: number | null
+  active_connections?: number
+  audio_device?: string | null
+  sample_rate?: number
 }
 
 export const getServiceBaseUrl = (): string => {
@@ -34,8 +45,7 @@ export const getServiceBaseUrl = (): string => {
     if (custom) {
       try {
         const parsed = new URL(custom.trim())
-        // Only allow loopback addresses to prevent SSRF
-        if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
           return parsed.origin
         }
       } catch {
@@ -44,6 +54,29 @@ export const getServiceBaseUrl = (): string => {
     }
   }
   return DEFAULT
+}
+
+export const setServiceBaseUrl = (url: string): boolean => {
+  const DEFAULT = 'http://127.0.0.1:8765'
+  if (typeof window === 'undefined') return false
+  const trimmed = url.trim()
+  if (!trimmed) {
+    localStorage.removeItem('kvie_backend_url')
+    window.dispatchEvent(new CustomEvent('kvie_backend_url_changed', { detail: { url: DEFAULT } }))
+    return true
+  }
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false
+    }
+    const origin = parsed.origin
+    localStorage.setItem('kvie_backend_url', origin)
+    window.dispatchEvent(new CustomEvent('kvie_backend_url_changed', { detail: { url: origin } }))
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function fetchServiceHealth(): Promise<ServiceHealthResponse | null> {

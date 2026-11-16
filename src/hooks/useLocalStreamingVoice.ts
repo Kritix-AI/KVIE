@@ -117,9 +117,44 @@ export const useLocalStreamingVoice = (enabled = true) => {
       retryTimer = window.setTimeout(checkService, connected ? 4000 : 1000)
     }
 
+    const cleanupSession = () => {
+      stopRequestedRef.current = true
+      if (partialTimerRef.current) {
+        window.clearTimeout(partialTimerRef.current)
+        partialTimerRef.current = null
+      }
+      pendingPartialRef.current = ''
+      flushResolverRef.current?.()
+      flushResolverRef.current = null
+      workletRef.current?.disconnect()
+      workletRef.current = null
+      streamRef.current?.getTracks().forEach(track => track.stop())
+      socketRef.current?.close()
+      onAudioDataRef.current = null
+      streamRef.current = null
+      socketRef.current = null
+      setAudioLevel(0)
+      setState(current => ({ ...current, isListening: false, interimTranscript: '' }))
+    }
+
+    const handleUrlChange = () => {
+      controller?.abort()
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+      setServiceConnected(false)
+      setIsAvailable(false)
+      cleanupSession()
+      void checkService()
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('kvie_backend_url_changed', handleUrlChange)
+    }
+
     void checkService()
     return () => {
       disposed = true
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('kvie_backend_url_changed', handleUrlChange)
+      }
       controller?.abort()
       if (retryTimer !== undefined) window.clearTimeout(retryTimer)
     }

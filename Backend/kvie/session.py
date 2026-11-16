@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from .document_state import DocumentSnapshot, DocumentState
+from .grammar_router import GrammarRouter
 from .intent_engine import IntentDecision
 from .llm_intent import KvieDecisionEngine
 from .storage import KVIEStore
@@ -16,6 +17,7 @@ class SessionResult:
     decision: IntentDecision
     snapshot: DocumentSnapshot
     changed: bool
+    grammar_changed: bool = False
 
 
 class KVIESession:
@@ -41,6 +43,13 @@ class KVIESession:
 
     def process_transcript(self, text: str, metadata: Optional[dict] = None) -> SessionResult:
         decision = self.decisions.decide(text, self.document)
+        grammar_changed = False
+        if decision.action in {"append", "replace_sentence", "insert_after_sentence"} and decision.content:
+            polished = GrammarRouter.route(decision.content)
+            if polished != decision.content:
+                grammar_changed = True
+                decision = replace(decision, content=polished)
+
         before = self.document.text
         snapshot = self.decisions.apply(decision, self.document)
         changed = before != snapshot.text
@@ -52,4 +61,9 @@ class KVIESession:
                 # so guard against popping the only entry (IndexError) and never
                 # record a stale row.
                 self.store.save_operation(self.document_id, history[-1])
-        return SessionResult(decision=decision, snapshot=snapshot, changed=changed)
+        return SessionResult(
+            decision=decision,
+            snapshot=snapshot,
+            changed=changed,
+            grammar_changed=grammar_changed,
+        )

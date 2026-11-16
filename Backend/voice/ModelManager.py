@@ -18,6 +18,8 @@ _ROOT = os.path.dirname(_BACKEND_DIR)
 
 MODEL_REPO_MAP = {
     "kritix-stt": "kritix-ai/Stt",
+    "Systran/faster-whisper-large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
+    "large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
 }
 
 _active_download_lock = threading.Lock()
@@ -135,10 +137,10 @@ def get_active_model_id() -> str:
     try:
         from dotenv import dotenv_values
         env = dotenv_values(os.path.join(_ROOT, ".env"))
-        configured = env.get("ASRModel") or env.get("WhisperModel") or "kritix-stt"
-        return configured if configured in MODEL_REPO_MAP else "kritix-stt"
+        configured = env.get("ASRModel") or env.get("WhisperModel") or env.get("WhisperModelSize") or "Systran/faster-whisper-large-v3-turbo"
+        return configured if configured in MODEL_REPO_MAP else "Systran/faster-whisper-large-v3-turbo"
     except Exception:
-        return "kritix-stt"
+        return "Systran/faster-whisper-large-v3-turbo"
 
 
 def get_model_snapshot_path(model_id: str) -> Optional[str]:

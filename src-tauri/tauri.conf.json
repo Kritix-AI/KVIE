@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "KVIE — Voice Workspace",
+        "title": "KVIE \u2014 Voice Workspace",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
@@ -37,7 +37,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; connect-src 'self' http://localhost:8765 http://127.0.0.1:8765 ws://localhost:8765 ws://127.0.0.1:8765; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
+      "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
     }
   },
   "bundle": {

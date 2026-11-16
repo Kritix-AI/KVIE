@@ -1,3 +1,7 @@
+import tempfile
+import unittest
+from pathlib import Path
+
 from Backend.kvie.document_state import DocumentState
 from Backend.kvie.storage import KVIEStore
 from Backend.voice.StreamingSTT import TranscriptEvent
@@ -20,3 +24,13 @@ def test_store_persists_documents_operations_and_events(tmp_path):
     assert reopened.count("edit_operations") == 1
     assert reopened.count("transcript_events") == 1
     reopened.close()
+
+
+class TestKVIEStorageLegacy(unittest.TestCase):
+    def test_legacy_store_persistence(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_store_persists_documents_operations_and_events(Path(tmp_dir))
+
+
+if __name__ == "__main__":
+    unittest.main()

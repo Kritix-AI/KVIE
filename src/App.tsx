@@ -41,6 +41,7 @@ import {
   X,
   GitBranch,
   CheckCheck,
+  Server,
 } from 'lucide-react'
 import { useKvieDocument } from './hooks/useKvieDocument'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
@@ -60,6 +61,8 @@ import {
   downloadModelWithProgress,
   refineVoiceTextWithLLM,
   getServiceBaseUrl,
+  setServiceBaseUrl,
+  type ServiceHealthResponse,
 } from './lib/modelsApi'
 import {
   isAndroid,
@@ -136,6 +139,28 @@ export function App() {
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({})
   const [modelServiceStatus, setModelServiceStatus] = useState<'checking' | 'online' | 'offline'>('checking')
   const [modelPageMessage, setModelPageMessage] = useState<string | null>(null)
+  const [serviceHealth, setServiceHealth] = useState<ServiceHealthResponse | null>(null)
+  const [backendUrlInput, setBackendUrlInput] = useState<string>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('kvie_backend_url') || '' : ''
+  })
+  const [backendUrlFeedback, setBackendUrlFeedback] = useState<string | null>(null)
+
+  const handleSaveBackendUrl = (urlToSave?: string) => {
+    const value = urlToSave !== undefined ? urlToSave : backendUrlInput
+    const ok = setServiceBaseUrl(value)
+    if (ok) {
+      setBackendUrlFeedback(value.trim() ? 'Endpoint saved. Connecting...' : 'Reset to default (127.0.0.1:8765)')
+      setTimeout(() => setBackendUrlFeedback(null), 3500)
+    } else {
+      setBackendUrlFeedback('Invalid URL. Must begin with http:// or https://')
+      setTimeout(() => setBackendUrlFeedback(null), 4000)
+    }
+  }
+
+  const handleResetBackendUrl = () => {
+    setBackendUrlInput('')
+    handleSaveBackendUrl('')
+  }
   const [sessions, setSessions] = useState<VoiceSession[]>([])
   const [sessionSearch, setSessionSearch] = useState('')
   const [injectionMessage, setInjectionMessage] = useState<string | null>(null)
@@ -210,6 +235,7 @@ export function App() {
     const refreshModelStatus = async () => {
       const [status, health] = await Promise.all([fetchModelsStatus(), fetchServiceHealth()])
       if (disposed) return
+      setServiceHealth(health)
       setModelServiceStatus(status && health ? 'online' : 'offline')
       if (status) setDownloadedModels(status.installed)
       if (status && health) {
@@ -223,9 +249,27 @@ export function App() {
 
     void refreshModelStatus()
     const timer = window.setInterval(() => void refreshModelStatus(), 4000)
+
+    const handleUrlChange = (e?: Event) => {
+      setModelServiceStatus('checking')
+      if (typeof window !== 'undefined') {
+        const customEvt = e as CustomEvent<{ url?: string }> | undefined
+        const currentUrl = customEvt?.detail?.url ?? localStorage.getItem('kvie_backend_url') ?? ''
+        setBackendUrlInput(currentUrl === 'http://127.0.0.1:8765' ? '' : currentUrl)
+      }
+      void refreshModelStatus()
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('kvie_backend_url_changed', handleUrlChange)
+    }
+
     return () => {
       disposed = true
       window.clearInterval(timer)
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('kvie_backend_url_changed', handleUrlChange)
+      }
     }
   }, [isAndroidDevice])
 
@@ -1326,24 +1370,34 @@ export function App() {
               </div>
 
               {!isAndroidDevice && (
-                <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${
-                  modelServiceStatus === 'online'
-                    ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
-                    : modelServiceStatus === 'offline'
-                      ? 'border-amber-500/25 bg-amber-500/5 text-amber-200'
-                      : 'border-line bg-panel/60 text-zinc-300'
-                }`}>
-                  <div className="flex items-center gap-2.5">
-                    <span className={`h-2.5 w-2.5 rounded-full ${modelServiceStatus === 'online' ? 'bg-emerald-400' : modelServiceStatus === 'offline' ? 'bg-amber-400' : 'animate-pulse bg-zinc-500'}`} />
-                    <span>
-                      {modelServiceStatus === 'online'
-                        ? `Python model service online · ${downloadedModels.length} model${downloadedModels.length === 1 ? '' : 's'} installed`
-                        : modelServiceStatus === 'offline'
-                          ? 'Python service offline · install Python 3 and requirements.txt if model downloads or live transcription stay unavailable'
-                          : 'Checking local Python model service…'}
-                    </span>
+                <div className="space-y-3">
+                  <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${
+                    modelServiceStatus === 'online'
+                      ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
+                      : modelServiceStatus === 'offline'
+                        ? 'border-amber-500/25 bg-amber-500/5 text-amber-200'
+                        : 'border-line bg-panel/60 text-zinc-300'
+                  }`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className={`h-2.5 w-2.5 rounded-full ${modelServiceStatus === 'online' ? 'bg-emerald-400' : modelServiceStatus === 'offline' ? 'bg-amber-400' : 'animate-pulse bg-zinc-500'}`} />
+                      <span>
+                        {modelServiceStatus === 'online'
+                          ? serviceHealth?.gpu_available
+                            ? `GPU model service online (${serviceHealth.gpu_name || 'CUDA GPU'}) · ${downloadedModels.length} local model${downloadedModels.length === 1 ? '' : 's'}`
+                            : `Python model service online · ${downloadedModels.length} model${downloadedModels.length === 1 ? '' : 's'} installed`
+                          : modelServiceStatus === 'offline'
+                            ? (backendUrlInput ? 'Backend service offline · Check your remote URL in Settings or run python -m Backend.kvie.service locally' : 'Python service offline · If using Colab GPU, enter your Tunnel URL in Settings. Otherwise run python -m Backend.kvie.service locally.')
+                            : 'Checking Python model service…'}
+                      </span>
+                    </div>
+                    <span className="text-xs text-zinc-400">Models are stored in the Hugging Face cache on this PC.</span>
                   </div>
-                  <span className="text-xs text-zinc-400">Models are stored in the Hugging Face cache on this PC.</span>
+
+                  {modelServiceStatus !== 'online' && (
+                    <div className="flex items-center gap-3 rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-xs text-sky-200">
+                      <span>💡 <b>Using Google Colab GPU?</b> You don't need to download models locally! Go to <b>Settings ➔ Backend Service &amp; Remote GPU</b>, paste your Colab tunnel URL, and speech recognition will stream directly to your cloud GPU.</span>
+                    </div>
+                  )}
                 </div>
               )}
               {modelPageMessage && (
@@ -1481,6 +1535,114 @@ export function App() {
                     )
                   })}
                 </div>
+              </div>
+
+              {/* BACKEND SERVICE & REMOTE GPU CONNECTION */}
+              <div className="rounded-2xl sm:rounded-3xl border border-line bg-panel/80 p-4 sm:p-6 space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl p-2.5 bg-zinc-800" style={{ color: theme.accentColor }}>
+                      <Server className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-zinc-100 text-base sm:text-lg">Backend Service &amp; Remote GPU</h3>
+                        <span className={`rounded-full text-[10px] px-2.5 py-0.5 border font-medium ${
+                          modelServiceStatus === 'online'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : modelServiceStatus === 'checking'
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                        }`}>
+                          {modelServiceStatus === 'online' ? '● Connected' : modelServiceStatus === 'checking' ? 'Connecting...' : '○ Offline'}
+                        </span>
+                        {serviceHealth && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full text-[10px] px-2.5 py-0.5 border font-medium bg-zinc-800/80 text-zinc-300 border-line">
+                            <Cpu className="h-3 w-3 text-cyan-400" />
+                            <span>{serviceHealth.gpu_name || (serviceHealth.gpu_available ? 'GPU' : (serviceHealth.device ? serviceHealth.device.toUpperCase() : 'CPU'))}</span>
+                            {serviceHealth.vram_total_mb && serviceHealth.vram_total_mb > 0 ? (
+                              <span className="text-emerald-400 font-mono">
+                                ({Math.round(serviceHealth.vram_allocated_mb || 0)}/{Math.round(serviceHealth.vram_total_mb)} MB)
+                              </span>
+                            ) : null}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-zinc-400">Configure local daemon or remote GPU host (e.g. GConnect, Tailscale, LAN)</p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-zinc-500 font-mono">
+                    Active: {getServiceBaseUrl()}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-zinc-300">Server Endpoint URL</label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={backendUrlInput}
+                      onChange={e => setBackendUrlInput(e.target.value)}
+                      placeholder="http://127.0.0.1:8765 (default)"
+                      className="flex-1 rounded-xl border border-line bg-zinc-900/80 px-3.5 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSaveBackendUrl()}
+                        className="rounded-xl px-4 py-2 text-xs font-semibold text-black transition hover:opacity-90"
+                        style={{ backgroundColor: theme.accentColor }}
+                      >
+                        Save &amp; Connect
+                      </button>
+                      {backendUrlInput && (
+                        <button
+                          onClick={handleResetBackendUrl}
+                          className="rounded-xl border border-line bg-zinc-800/80 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {backendUrlFeedback && (
+                    <p className="text-[11px] text-cyan-400 pt-0.5">{backendUrlFeedback}</p>
+                  )}
+                </div>
+
+                {serviceHealth && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                    <div className="rounded-xl border border-line/60 bg-zinc-900/60 p-3">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500 flex items-center gap-1">
+                        <Cpu className="h-3 w-3 text-cyan-400" /> Device
+                      </span>
+                      <p className="text-xs font-mono font-semibold text-zinc-200 mt-0.5 uppercase">
+                        {serviceHealth.device || (serviceHealth.gpu_available ? 'CUDA' : 'CPU')}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-line/60 bg-zinc-900/60 p-3">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500">Precision</span>
+                      <p className="text-xs font-mono font-semibold text-cyan-400 mt-0.5">
+                        {serviceHealth.compute_type || 'int8'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-line/60 bg-zinc-900/60 p-3">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500 flex items-center gap-1">
+                        <Cpu className="h-3 w-3 text-cyan-400" /> GPU Hardware
+                      </span>
+                      <p className="text-xs font-semibold text-zinc-200 mt-0.5 truncate" title={serviceHealth.gpu_name || 'None'}>
+                        {serviceHealth.gpu_name || (serviceHealth.gpu_available ? 'NVIDIA GPU' : 'None (CPU)')}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-line/60 bg-zinc-900/60 p-3">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500">VRAM Usage</span>
+                      <p className="text-xs font-mono font-semibold text-emerald-400 mt-0.5">
+                        {serviceHealth.vram_total_mb && serviceHealth.vram_total_mb > 0
+                          ? `${Math.round(serviceHealth.vram_allocated_mb || 0)} / ${Math.round(serviceHealth.vram_total_mb)} MB`
+                          : 'N/A (CPU)'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* GLOBAL PUSH-TO-TALK HOTKEY */}

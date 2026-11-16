@@ -1507,6 +1507,12 @@ fn get_project_root() -> PathBuf {
             return candidate;
         }
     }
+    if let Ok(from_env) = std::env::var("KVIE_ROOT") {
+        let candidate = PathBuf::from(from_env);
+        if candidate.join("Backend").exists() {
+            return candidate;
+        }
+    }
     if let Ok(cwd) = std::env::current_dir() {
         if cwd.join("Backend").exists() {
             return cwd;
@@ -1518,12 +1524,39 @@ fn get_project_root() -> PathBuf {
         }
     }
     if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let res_dir = parent.join("resources");
+            if res_dir.join("Backend").exists() {
+                return res_dir;
+            }
+            if parent.join("Backend").exists() {
+                return parent.to_path_buf();
+            }
+        }
         let mut current = exe.as_path();
         while let Some(parent) = current.parent() {
             if parent.join("Backend").exists() {
                 return parent.to_path_buf();
             }
             current = parent;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        let p1 = PathBuf::from(&userprofile).join("OneDrive").join("Documents").join("GitHub").join("KVIE");
+        if p1.join("Backend").exists() {
+            return p1;
+        }
+        let p2 = PathBuf::from(&userprofile).join("Documents").join("GitHub").join("KVIE");
+        if p2.join("Backend").exists() {
+            return p2;
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    if let Ok(home) = std::env::var("HOME") {
+        let p1 = PathBuf::from(&home).join("KVIE");
+        if p1.join("Backend").exists() {
+            return p1;
         }
     }
     PathBuf::from(".")
@@ -1640,6 +1673,16 @@ fn download_model_native(app_handle: tauri::AppHandle, model_id: String) -> Resu
         }
 
         let root = get_project_root();
+        if !root.join("Backend").exists() {
+            let _ = app_handle.emit(
+                "model-download-error",
+                serde_json::json!({
+                    "model_id": normalized,
+                    "error": "Local Python Backend directory not found. If using Google Colab, connect via Settings -> Backend Service & Remote GPU. For local use, run 'python -m Backend.kvie.service' in your KVIE directory.",
+                }),
+            );
+            return;
+        }
         let root_str = root.to_string_lossy().replace('\\', "/");
 
         let script = r#"import sys, os, json
@@ -1672,7 +1715,7 @@ ModelManager.download_model_stream(os.environ["__MODEL_ID__"], on_progress)
             cmd.env("__KVIE_ROOT__", &root_str);
             cmd.env("__MODEL_ID__", &normalized);
             cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::piped());
             #[cfg(target_os = "windows")]
             cmd.creation_flags(0x08000000);
             cmd.spawn()
@@ -1717,17 +1760,28 @@ ModelManager.download_model_stream(os.environ["__MODEL_ID__"], on_progress)
                         }
                     }
                 }
+                let mut stderr_output = String::new();
+                if let Some(mut stderr) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = stderr.read_to_string(&mut stderr_output);
+                }
                 if !child.wait().map(|status| status.success()).unwrap_or(false) {
+                    let err_msg = if !stderr_output.trim().is_empty() {
+                        let last_line = stderr_output.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("Model downloader exited unexpectedly");
+                        format!("Downloader failed: {}", last_line)
+                    } else {
+                        "Model downloader exited unexpectedly. Ensure local Python and requirements.txt are installed, or use Colab GPU in Settings.".to_string()
+                    };
                     let _ = app_handle.emit("model-download-error", serde_json::json!({
                         "model_id": normalized,
-                        "error": "Model downloader exited unexpectedly",
+                        "error": err_msg,
                     }));
                 }
             }
-            Err(_) => {
+            Err(e) => {
                 let _ = app_handle.emit("model-download-error", serde_json::json!({
                     "model_id": normalized,
-                    "error": "Could not start the model downloader",
+                    "error": format!("Could not start the model downloader ({})", e),
                 }));
             }
         }

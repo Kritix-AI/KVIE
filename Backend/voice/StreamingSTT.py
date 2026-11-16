@@ -257,9 +257,37 @@ class StreamingSTT:
 
     def _drain_windows(self, final: bool) -> None:
         # Phase 1: full window transcribes
+        min_speech_bytes = int(self.config.bytes_per_second * 0.2)
         while len(self._buffer) >= self.config.window_bytes:
             window = bytes(self._buffer[: self.config.window_bytes])
-            self._transcribe(window, self._buffer_start_ms, final=False)
+            speech_bytes = self._count_speech_bytes(window)
+
+            if self.config.speech_threshold > 0 and speech_bytes < min_speech_bytes:
+                # Ambient silence / room noise: bypass model inference to prevent hallucination
+                self._silence_count += 1
+                if self._silence_count >= 2 and self._rolling_text.strip() and not final:
+                    if os.environ.get("KVIE_TRACE_STAGES") == "1":
+                        import sys
+                        print(f"[STAGE 2: BACKEND MERGED] kind='final (pause)' emitted={self._rolling_text!r}", file=sys.stderr, flush=True)
+                    self._emit(
+                        "final",
+                        text=self._rolling_text,
+                        language=self._rolling_language,
+                        confidence=self._rolling_confidence,
+                        start_ms=self._buffer_start_ms,
+                        end_ms=self._buffer_start_ms + int(len(window) / self.config.bytes_per_second * 1000),
+                    )
+                    self._rolling_text = ""
+                    self._rolling_confidence = 0.0
+                    self._rolling_language = ""
+                    self._silence_count = 0
+                    self._buffer.clear()
+                    self._buffer_start_ms = 0
+                    self._committed_bytes = self._audio_bytes_processed
+                    break
+            else:
+                self._transcribe(window, self._buffer_start_ms, final=False)
+
             if not self._buffer:
                 # Buffer was cleared (e.g. pause finalization)
                 break
@@ -270,7 +298,6 @@ class StreamingSTT:
         new_bytes = max(0, min(len(self._buffer), self._audio_bytes_processed - self._committed_bytes))
         uncommitted_pcm = bytes(self._buffer[-new_bytes:]) if new_bytes > 0 else b""
         new_speech_bytes = self._count_speech_bytes(uncommitted_pcm)
-        min_speech_bytes = int(self.config.bytes_per_second * 0.2)
 
         # Phase 2: early draft — enough audio accumulated but not a full window yet.
         # Fire a partial so the client can show the user what we have so far.

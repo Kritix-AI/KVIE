@@ -254,3 +254,8 @@ System Volume Information/
 # .gitkeep files inside them are committed)
 !.gitkeep
 !/.gitkeep
+
+# Colab & local testing artifacts
+dist_colab/*.zip
+test_speech.wav
+.agents/teamwork/
