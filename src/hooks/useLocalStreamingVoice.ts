@@ -137,24 +137,9 @@ export const useLocalStreamingVoice = (enabled = true) => {
       setState(current => ({ ...current, isListening: false, interimTranscript: '' }))
     }
 
-    const handleUrlChange = () => {
-      controller?.abort()
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
-      setServiceConnected(false)
-      setIsAvailable(false)
-      cleanupSession()
-      void checkService()
-    }
-    if (typeof window !== 'undefined') {
-      window.addEventListener('kvie_backend_url_changed', handleUrlChange)
-    }
-
     void checkService()
     return () => {
       disposed = true
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('kvie_backend_url_changed', handleUrlChange)
-      }
       controller?.abort()
       if (retryTimer !== undefined) window.clearTimeout(retryTimer)
     }

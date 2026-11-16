@@ -39,44 +39,7 @@ export interface ServiceHealthResponse {
 }
 
 export const getServiceBaseUrl = (): string => {
-  const DEFAULT = 'http://127.0.0.1:8765'
-  if (typeof window !== 'undefined') {
-    const custom = localStorage.getItem('kvie_backend_url')
-    if (custom) {
-      try {
-        const parsed = new URL(custom.trim())
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-          return parsed.origin
-        }
-      } catch {
-        // Invalid URL — fall through to default
-      }
-    }
-  }
-  return DEFAULT
-}
-
-export const setServiceBaseUrl = (url: string): boolean => {
-  const DEFAULT = 'http://127.0.0.1:8765'
-  if (typeof window === 'undefined') return false
-  const trimmed = url.trim()
-  if (!trimmed) {
-    localStorage.removeItem('kvie_backend_url')
-    window.dispatchEvent(new CustomEvent('kvie_backend_url_changed', { detail: { url: DEFAULT } }))
-    return true
-  }
-  try {
-    const parsed = new URL(trimmed)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return false
-    }
-    const origin = parsed.origin
-    localStorage.setItem('kvie_backend_url', origin)
-    window.dispatchEvent(new CustomEvent('kvie_backend_url_changed', { detail: { url: origin } }))
-    return true
-  } catch {
-    return false
-  }
+  return 'http://127.0.0.1:8765'
 }
 
 export async function fetchServiceHealth(): Promise<ServiceHealthResponse | null> {
